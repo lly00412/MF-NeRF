@@ -96,6 +96,16 @@ public:
 		local_rgb_network_config["n_input_dims"] = m_rgb_network_input_width;
 		local_rgb_network_config["n_output_dims"] = 3;
 		m_rgb_network.reset(tcnn::create_network<T>(local_rgb_network_config));
+		
+		tlog::info() << "Initialize Nerf";
+		for (auto e : m_rgb_network->layer_sizes()) {
+			tlog::info() << "  [" << e.second << ", " << e.first << "]";
+		}
+		tlog::info() << "  output_width: " << m_rgb_network->output_width();
+		tlog::info() << "  padded_output_width: " << m_rgb_network->padded_output_width();
+
+		tlog::info() << "local_density_network_config: " << local_density_network_config;
+		tlog::info() << "local_rgb_network_config: " << local_rgb_network_config;
 	}
 
 	virtual ~NerfNetwork() { }
@@ -520,7 +530,7 @@ public:
 		};
 	}
 
-private:
+// private:
 	std::unique_ptr<tcnn::Network<T>> m_density_network;
 	std::unique_ptr<tcnn::Network<T>> m_rgb_network;
 	std::shared_ptr<tcnn::Encoding<T>> m_pos_encoding;
@@ -532,6 +542,7 @@ private:
 	uint32_t m_n_extra_dims; // extra dimensions are assumed to be part of a compound encoding with dir_dims
 	uint32_t m_dir_offset;
 
+private:
 	// // Storage of forward pass data
 	struct ForwardContext : public tcnn::Context {
 		tcnn::GPUMatrixDynamic<T> density_network_input;

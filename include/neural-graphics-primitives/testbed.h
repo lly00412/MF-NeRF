@@ -67,6 +67,7 @@ public:
 	Testbed(ETestbedMode mode, const std::string& data_path, const nlohmann::json& network_config) : Testbed(mode, data_path) { reload_network_from_json(network_config); }
 	void load_training_data(const std::string& data_path);
 	void clear_training_data();
+	size_t get_allocatd_momory_size() const;
 
 	using distance_fun_t = std::function<void(uint32_t, const tcnn::GPUMemory<Eigen::Vector3f>&, tcnn::GPUMemory<float>&, cudaStream_t)>;
 	using normals_fun_t = std::function<void(uint32_t, const tcnn::GPUMemory<Eigen::Vector3f>&, tcnn::GPUMemory<Eigen::Vector3f>&, cudaStream_t)>;
@@ -434,6 +435,7 @@ public:
 	EGroundTruthRenderMode m_ground_truth_render_mode = EGroundTruthRenderMode::Shade;
 
 	bool m_train = false;
+	bool m_train_aborting = false;
 	bool m_training_data_available = false;
 	bool m_render = true;
 	int m_max_spp = 0;
@@ -780,6 +782,61 @@ public:
 	BoundingBox m_aabb;
 	BoundingBox m_render_aabb;
 	Eigen::Matrix3f m_render_aabb_to_local;
+
+	uint64_t random_seed() {
+		m_seed = Eigen::internal::random<uint64_t>();
+		return m_seed;
+	}
+
+	struct CustomTimer {
+		std::chrono::time_point<std::chrono::system_clock> m_timer_start = std::chrono::system_clock::now();
+		double m_nerf_reset_accumulation_start;
+		double m_nerf_reset_accumulation_end;
+		double m_nerf_train_prep_start;
+		double m_nerf_train_prep_end;
+		double m_nerf_update_hyperparam_start;
+		double m_nerf_update_hyperparam_end;
+		double m_nerf_i_dont_know1_start;
+		double m_nerf_i_dont_know1_end;
+		double m_nerf_train_start;
+		double m_nerf_train_sampling_start;
+		double m_nerf_train_sampling_end;
+		double m_nerf_train_inference_start;
+		double m_nerf_train_inference_end;
+		double m_nerf_train_loss_start;
+		double m_nerf_train_loss_end;
+		double m_nerf_train_forward;
+		double m_nerf_train_backward;
+		double m_nerf_train_backward_end;
+		double m_nerf_train_end;
+		double m_nerf_optimizer_start;
+		double m_nerf_optimizer_end;
+		double m_nerf_envmap_start;
+		double m_nerf_envmap_end;
+		double m_nerf_rgb_loss_scalar_start;
+		double m_nerf_memcopy_start;
+		double m_nerf_memcopy_end;
+		double m_nerf_rgb_loss_scalar_end;
+		double m_nerf_compute_cdf_start;
+		double m_nerf_compute_cdf_end;
+		double m_nerf_train_extra_dims_start;
+		double m_nerf_train_extra_dims_end;
+		double m_nerf_train_camera_start;
+		double m_nerf_train_camera_end;
+		double m_nerf_update_loss_graph_start;
+		double m_nerf_update_loss_graph_end;
+	} m_timer;
+
+	struct CustomMemoryTracker {
+		size_t m_base = tcnn::total_n_bytes_allocated() + dlss_allocated_bytes();
+		size_t m_nerf_train_prep_end;
+		size_t m_nerf_train_sampling_end;
+		size_t m_nerf_train_inference_end;
+		size_t m_nerf_train_loss_end;
+		size_t m_nerf_train_forward_end;
+		size_t m_nerf_train_backward_end;
+		size_t m_nerf_optimizer_end;
+	} m_mem_tracker;
 
 	// Rendering/UI bookkeeping
 	Ema m_training_prep_ms = {EEmaType::Time, 100};

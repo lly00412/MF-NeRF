@@ -415,6 +415,7 @@ PYBIND11_MODULE(pyngp, m) {
 			"`thresh` is the density threshold; use 0 for SDF; 2.5 works well for NeRF. "
 			"If the aabb parameter specifies an inside-out (\"empty\") box (default), the current render_aabb bounding box is used."
 		)
+		.def("random_seed", &Testbed::random_seed, "reset seed randomly")
 		;
 
 	// Interesting members.
@@ -423,6 +424,7 @@ PYBIND11_MODULE(pyngp, m) {
 		.def_readwrite("dynamic_res_target_fps", &Testbed::m_dynamic_res_target_fps)
 		.def_readwrite("fixed_res_factor", &Testbed::m_fixed_res_factor)
 		.def_readwrite("background_color", &Testbed::m_background_color)
+		.def_readonly("is_train_aborted", &Testbed::m_train_aborting)
 		.def_readwrite("shall_train", &Testbed::m_train)
 		.def_readwrite("shall_train_encoding", &Testbed::m_train_encoding)
 		.def_readwrite("shall_train_network", &Testbed::m_train_network)
@@ -469,6 +471,8 @@ PYBIND11_MODULE(pyngp, m) {
 		.def_readonly("nerf", &Testbed::m_nerf)
 		.def_readonly("sdf", &Testbed::m_sdf)
 		.def_readonly("image", &Testbed::m_image)
+		.def_readonly("m_timer", &Testbed::m_timer)
+		.def_readonly("m_mem_tracker", &Testbed::m_mem_tracker)
 		.def_readwrite("camera_smoothing", &Testbed::m_camera_smoothing)
 		.def_readwrite("display_gui", &Testbed::m_imgui_enabled)
 		.def_readwrite("visualize_unit_cube", &Testbed::m_visualize_unit_cube)
@@ -515,6 +519,57 @@ PYBIND11_MODULE(pyngp, m) {
 		.def_readwrite("visualize_cameras", &Testbed::Nerf::visualize_cameras)
 		.def_readwrite("glow_y_cutoff", &Testbed::Nerf::glow_y_cutoff)
 		.def_readwrite("glow_mode", &Testbed::Nerf::glow_mode)
+		;
+
+	py::class_<Testbed::CustomTimer> customtimer(testbed, "CustomTimer");
+	customtimer
+		.def_readonly("m_nerf_reset_accumulation_start", &Testbed::CustomTimer::m_nerf_reset_accumulation_start)
+		.def_readonly("m_nerf_reset_accumulation_end", &Testbed::CustomTimer::m_nerf_reset_accumulation_end)
+		.def_readonly("m_nerf_train_prep_start", &Testbed::CustomTimer::m_nerf_train_prep_start)
+		.def_readonly("m_nerf_train_prep_end", &Testbed::CustomTimer::m_nerf_train_prep_end)
+		.def_readonly("m_nerf_update_hyperparam_start", &Testbed::CustomTimer::m_nerf_update_hyperparam_start)
+		.def_readonly("m_nerf_update_hyperparam_end", &Testbed::CustomTimer::m_nerf_update_hyperparam_end)
+		.def_readonly("m_nerf_i_dont_know1_start", &Testbed::CustomTimer::m_nerf_i_dont_know1_start)
+		.def_readonly("m_nerf_i_dont_know1_end", &Testbed::CustomTimer::m_nerf_i_dont_know1_end)
+		.def_readonly("m_nerf_train_start", &Testbed::CustomTimer::m_nerf_train_start)
+		.def_readonly("m_nerf_train_sampling_start", &Testbed::CustomTimer::m_nerf_train_sampling_start)
+		.def_readonly("m_nerf_train_sampling_end", &Testbed::CustomTimer::m_nerf_train_sampling_end)
+		.def_readonly("m_nerf_train_inference_start", &Testbed::CustomTimer::m_nerf_train_inference_start)
+		.def_readonly("m_nerf_train_inference_end", &Testbed::CustomTimer::m_nerf_train_inference_end)
+		.def_readonly("m_nerf_train_loss_start", &Testbed::CustomTimer::m_nerf_train_loss_start)
+		.def_readonly("m_nerf_train_loss_end", &Testbed::CustomTimer::m_nerf_train_loss_end)
+		.def_readonly("m_nerf_train_forward", &Testbed::CustomTimer::m_nerf_train_forward)
+		.def_readonly("m_nerf_train_backward", &Testbed::CustomTimer::m_nerf_train_backward)
+		.def_readonly("m_nerf_train_backward_end", &Testbed::CustomTimer::m_nerf_train_backward_end)
+		.def_readonly("m_nerf_train_end", &Testbed::CustomTimer::m_nerf_train_end)
+		.def_readonly("m_nerf_optimizer_start", &Testbed::CustomTimer::m_nerf_optimizer_start)
+		.def_readonly("m_nerf_optimizer_end", &Testbed::CustomTimer::m_nerf_optimizer_end)
+		.def_readonly("m_nerf_envmap_start", &Testbed::CustomTimer::m_nerf_envmap_start)
+		.def_readonly("m_nerf_envmap_end", &Testbed::CustomTimer::m_nerf_envmap_end)
+		.def_readonly("m_nerf_rgb_loss_scalar_start", &Testbed::CustomTimer::m_nerf_rgb_loss_scalar_start)
+		.def_readonly("m_nerf_memcopy_start", &Testbed::CustomTimer::m_nerf_memcopy_start)
+		.def_readonly("m_nerf_memcopy_end", &Testbed::CustomTimer::m_nerf_memcopy_end)
+		.def_readonly("m_nerf_rgb_loss_scalar_end", &Testbed::CustomTimer::m_nerf_rgb_loss_scalar_end)
+		.def_readonly("m_nerf_compute_cdf_start", &Testbed::CustomTimer::m_nerf_compute_cdf_start)
+		.def_readonly("m_nerf_compute_cdf_end", &Testbed::CustomTimer::m_nerf_compute_cdf_end)
+		.def_readonly("m_nerf_train_extra_dims_start", &Testbed::CustomTimer::m_nerf_train_extra_dims_start)
+		.def_readonly("m_nerf_train_extra_dims_end", &Testbed::CustomTimer::m_nerf_train_extra_dims_end)
+		.def_readonly("m_nerf_train_camera_start", &Testbed::CustomTimer::m_nerf_train_camera_start)
+		.def_readonly("m_nerf_train_camera_end", &Testbed::CustomTimer::m_nerf_train_camera_end)
+		.def_readonly("m_nerf_update_loss_graph_start", &Testbed::CustomTimer::m_nerf_update_loss_graph_start)
+		.def_readonly("m_nerf_update_loss_graph_end", &Testbed::CustomTimer::m_nerf_update_loss_graph_end)
+		;
+	
+	py::class_<Testbed::CustomMemoryTracker> custommemtracker(testbed, "CustomMemoryTracker");
+	custommemtracker
+		.def_readonly("m_base", &Testbed::CustomMemoryTracker::m_base)
+		.def_readonly("m_nerf_train_prep_end", &Testbed::CustomMemoryTracker::m_nerf_train_prep_end)
+		.def_readonly("m_nerf_train_sampling_end", &Testbed::CustomMemoryTracker::m_nerf_train_sampling_end)
+		.def_readonly("m_nerf_train_inference_end", &Testbed::CustomMemoryTracker::m_nerf_train_inference_end)
+		.def_readonly("m_nerf_train_loss_end", &Testbed::CustomMemoryTracker::m_nerf_train_loss_end)
+		.def_readonly("m_nerf_train_forward_end", &Testbed::CustomMemoryTracker::m_nerf_train_forward_end)
+		.def_readonly("m_nerf_train_backward_end", &Testbed::CustomMemoryTracker::m_nerf_train_backward_end)
+		.def_readonly("m_nerf_optimizer_end", &Testbed::CustomMemoryTracker::m_nerf_optimizer_end)
 		;
 
 	py::class_<BRDFParams> brdfparams(m, "BRDFParams");

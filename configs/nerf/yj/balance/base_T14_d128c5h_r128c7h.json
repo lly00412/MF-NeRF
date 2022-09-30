@@ -1,0 +1,22 @@
+{
+	"parent": "base.json",
+	"encoding": {		
+		"log2_hashmap_size": 14
+	},
+	"network": {
+		// The Cutlass MLP is actually faster than the fully
+		// fused MLP in this configuration, so use it instead.
+		"otype": "CutlassMLP",
+		"activation": "ReLU",
+		"output_activation": "None",
+		"n_neurons": 128,
+		"n_hidden_layers": 5
+	},
+	"rgb_network": {
+		"otype": "CutlassMLP",
+		"activation": "ReLU",
+		"output_activation": "None",
+		"n_neurons": 128,
+		"n_hidden_layers": 7
+	}
+}

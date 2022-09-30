@@ -199,7 +199,7 @@ else()
 	endif()
 endif()
 
-find_package(Python 3.7 COMPONENTS Interpreter Development)
+find_package(Python 3.9 COMPONENTS Interpreter Development)
 if (Python_FOUND)
 	add_subdirectory("dependencies/pybind11")
 endif()
@@ -292,6 +292,8 @@ target_link_directories(ngp PUBLIC ${NGP_LINK_DIRECTORIES})
 target_link_libraries(ngp PUBLIC ${NGP_LIBRARIES} tiny-cuda-nn)
 
 add_executable(testbed src/main.cu)
+target_link_options(testbed PUBLIC "LINKER:-lrt,-lresolv")
+target_link_directories(testbed PUBLIC /snap/gnome-3-38-2004/112/usr/lib/x86_64-linux-gnu)
 target_link_libraries(testbed PRIVATE ngp)
 
 # Copy DLSS shared libraries
@@ -318,8 +320,11 @@ endif()
 
 
 if (Python_FOUND)
+	message(STATUS ${Python_VERSION})
 	add_library(pyngp SHARED src/python_api.cu)
 	set_target_properties(pyngp PROPERTIES CXX_VISIBILITY_PRESET "hidden" CUDA_VISIBILITY_PRESET "hidden")
+	target_link_directories(pyngp PUBLIC /snap/gnome-3-38-2004/112/usr/lib/x86_64-linux-gnu)
+	target_link_options(pyngp PUBLIC "LINKER:-L/home/ylee298/.conda/envs/iNerf/x86_64-conda-linux-gnu/sysroot,-rpath,/home/ylee298/.conda/envs/iNerf/x86_64-conda-linux-gnu/sysroot")
 	target_link_libraries(pyngp PRIVATE ngp PUBLIC ${PYTHON_LIBRARIES} pybind11::module)
 	target_compile_definitions(pyngp PUBLIC -DNGP_PYTHON)
 	pybind11_extension(pyngp)

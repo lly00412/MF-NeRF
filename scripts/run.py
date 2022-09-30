@@ -24,12 +24,19 @@ from tqdm import tqdm
 
 import pyngp as ngp # noqa
 
+import csv
+
+# import torch
+# import torch.nn as nn
+# import torch.optim as optim
+
 def parse_args():
 	parser = argparse.ArgumentParser(description="Run neural graphics primitives testbed with additional configuration & output options")
 
 	parser.add_argument("--scene", "--training_data", default="", help="The scene to load. Can be the scene's name or a full path to the training data.")
 	parser.add_argument("--mode", default="", const="nerf", nargs="?", choices=["nerf", "sdf", "image", "volume"], help="Mode can be 'nerf', 'sdf', 'image' or 'volume'. Inferred from the scene if unspecified.")
 	parser.add_argument("--network", default="", help="Path to the network config. Uses the scene's default if unspecified.")
+	parser.add_argument("--profile", default="", help="Path to memory and time profiling data")
 
 	parser.add_argument("--load_snapshot", default="", help="Load this snapshot before training. recommended extension: .msgpack")
 	parser.add_argument("--save_snapshot", default="", help="Save this snapshot after training. recommended extension: .msgpack")
@@ -184,10 +191,69 @@ if __name__ == "__main__":
 	if n_steps < 0 and (not args.load_snapshot or args.gui):
 		n_steps = 35000
 
+	# # dummy loss, optimizer
+	# criterion = nn.CrossEntropyLoss()
+	# optimizer = optim.Adam(model.parameters(), lr=lr)
+
 	tqdm_last_update = 0
+	profiling_data = []
+	t_train_time = 0
+	t_train_time_start = time.monotonic()
 	if n_steps > 0:
 		with tqdm(desc="Training", total=n_steps, unit="step") as t:
 			while testbed.frame():
+				# # GPU warmup
+				# optimizer.zero_grad()
+				# output = global_model.local_list[0](noise_input)
+				# f_loss = criterion(output, noise_label)
+				# if i == 1000:
+				# 	print("Total CUDA Memory Allocated for training: %.2f MB"%(torch.cuda.memory_allocated(0)/1024/1024))
+				# f_loss.backward()
+				# optimizer.step()
+				if args.profile:
+					profiling_data.append([testbed.m_timer.m_nerf_reset_accumulation_start,
+											testbed.m_timer.m_nerf_reset_accumulation_end,
+											testbed.m_timer.m_nerf_train_prep_start,
+											testbed.m_timer.m_nerf_train_prep_end,
+											testbed.m_timer.m_nerf_update_hyperparam_start,
+											testbed.m_timer.m_nerf_update_hyperparam_end,
+											testbed.m_timer.m_nerf_i_dont_know1_start,
+											testbed.m_timer.m_nerf_i_dont_know1_end,
+											testbed.m_timer.m_nerf_train_start,
+											testbed.m_timer.m_nerf_train_sampling_start,
+											testbed.m_timer.m_nerf_train_sampling_end,
+											testbed.m_timer.m_nerf_train_inference_start,
+											testbed.m_timer.m_nerf_train_inference_end,
+											testbed.m_timer.m_nerf_train_loss_start,
+											testbed.m_timer.m_nerf_train_loss_end,
+											testbed.m_timer.m_nerf_train_forward,
+											testbed.m_timer.m_nerf_train_backward,
+											testbed.m_timer.m_nerf_train_backward_end,
+											testbed.m_timer.m_nerf_train_end,
+											testbed.m_timer.m_nerf_optimizer_start,
+											testbed.m_timer.m_nerf_optimizer_end,
+											testbed.m_timer.m_nerf_envmap_start,
+											testbed.m_timer.m_nerf_envmap_end,
+											testbed.m_timer.m_nerf_rgb_loss_scalar_start,
+											testbed.m_timer.m_nerf_rgb_loss_scalar_end,
+											testbed.m_timer.m_nerf_compute_cdf_start,
+											testbed.m_timer.m_nerf_compute_cdf_end,
+											testbed.m_timer.m_nerf_train_extra_dims_start,
+											testbed.m_timer.m_nerf_train_extra_dims_end,
+											testbed.m_timer.m_nerf_train_camera_start,
+											testbed.m_timer.m_nerf_train_camera_end,
+											testbed.m_timer.m_nerf_update_loss_graph_start,
+											testbed.m_timer.m_nerf_update_loss_graph_end,
+											testbed.m_mem_tracker.m_base,
+											testbed.m_mem_tracker.m_nerf_train_prep_end,
+											testbed.m_mem_tracker.m_nerf_train_sampling_end,
+											testbed.m_mem_tracker.m_nerf_train_inference_end,
+											testbed.m_mem_tracker.m_nerf_train_loss_end,
+											testbed.m_mem_tracker.m_nerf_train_forward_end,
+											testbed.m_mem_tracker.m_nerf_train_backward_end,
+											testbed.m_mem_tracker.m_nerf_optimizer_end
+											])
+
 				if testbed.want_repl():
 					repl(testbed)
 				# What will happen when training is done?
@@ -208,6 +274,10 @@ if __name__ == "__main__":
 					t.set_postfix(loss=testbed.loss)
 					old_training_step = testbed.training_step
 					tqdm_last_update = now
+			
+			t_train_time = time.monotonic() - t_train_time_start
+
+	print(t_train_time, testbed.loss)
 
 	if args.save_snapshot:
 		print("Saving snapshot ", args.save_snapshot)
@@ -254,7 +324,10 @@ if __name__ == "__main__":
 							if not os.path.isfile(ref_fname):
 								ref_fname = os.path.join(data_dir, p + ".exr")
 
-				ref_image = read_image(ref_fname)
+				try:
+					ref_image = read_image(ref_fname)
+				except:
+					continue
 
 				# NeRF blends with background colors in sRGB space, rather than first
 				# transforming to linear space, blending there, and then converting back.
@@ -279,6 +352,8 @@ if __name__ == "__main__":
 				if i == 0:
 					write_image("out.png", image)
 
+				if ref_image.shape[2] == 3 and image.shape[2] == 4:
+					image = np.delete(image, 3, 2)
 				diffimg = np.absolute(image - ref_image)
 				diffimg[...,3:4] = 1.0
 				if i == 0:
@@ -301,6 +376,53 @@ if __name__ == "__main__":
 		psnr = totpsnr/(totcount or 1)
 		ssim = totssim/(totcount or 1)
 		print(f"PSNR={psnr} [min={minpsnr} max={maxpsnr}] SSIM={ssim}")
+
+	if args.profile:
+		with open(os.path.join(args.profile, 'profiles.csv'), 'w', newline='') as f:
+			w = csv.writer(f)
+			w.writerow(['T_m_nerf_reset_accumulation_start',
+						'T_m_nerf_reset_accumulation_end',
+						'T_m_nerf_train_prep_start',
+						'T_m_nerf_train_prep_end',
+						'T_m_nerf_update_hyperparam_start',
+						'T_m_nerf_update_hyperparam_end',
+						'T_m_nerf_i_dont_know1_start',
+						'T_m_nerf_i_dont_know1_end',
+						'T_m_nerf_train_start',
+						'T_m_nerf_train_sampling_start',
+						'T_m_nerf_train_sampling_end',
+						'T_m_nerf_train_inference_start',
+						'T_m_nerf_train_inference_end',
+						'T_m_nerf_train_loss_start',
+						'T_m_nerf_train_loss_end',
+						'T_m_nerf_train_forward',
+						'T_m_nerf_train_backward',
+						'T_m_nerf_train_backward_end',
+						'T_m_nerf_train_end',
+						'T_m_nerf_optimizer_start',
+						'T_m_nerf_optimizer_end',
+						'T_m_nerf_envmap_start',
+						'T_m_nerf_envmap_end',
+						'T_m_nerf_rgb_loss_scalar_start',
+						'T_m_nerf_rgb_loss_scalar_end',
+						'T_m_nerf_compute_cdf_start',
+						'T_m_nerf_compute_cdf_end',
+						'T_m_nerf_train_extra_dims_start',
+						'T_m_nerf_train_extra_dims_end',
+						'T_m_nerf_train_camera_start',
+						'T_m_nerf_train_camera_end',
+						'T_m_nerf_update_loss_graph_start',
+						'T_m_nerf_update_loss_graph_end',
+						'M_m_base',
+						'M_m_nerf_train_prep_end',
+						'M_m_nerf_train_sampling_end',
+						'M_m_nerf_train_inference_end',
+						'M_m_nerf_train_loss_end',
+						'M_m_nerf_train_forward_end',
+						'M_m_nerf_train_backward_end',
+						'M_m_nerf_optimizer_end',
+						])
+			w.writerows(profiling_data)
 
 	if args.save_mesh:
 		res = args.marching_cubes_res or 256

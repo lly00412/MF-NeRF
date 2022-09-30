@@ -93,6 +93,10 @@ static bool ends_with(const std::string& str, const std::string& ending) {
 	return std::equal(std::rbegin(ending), std::rend(ending), std::rbegin(str));
 }
 
+size_t Testbed::get_allocatd_momory_size() const {
+	return tcnn::total_n_bytes_allocated() + g_total_n_bytes_allocated + dlss_allocated_bytes();
+}
+
 void Testbed::load_training_data(const std::string& data_path) {
 	m_data_path = data_path;
 
@@ -142,6 +146,7 @@ json Testbed::load_network_config(const fs::path& network_config_path) {
 }
 
 void Testbed::reload_network_from_file(const std::string& network_config_path) {
+	m_mem_tracker.m_base = get_allocatd_momory_size();
 	if (!network_config_path.empty()) {
 		m_network_config_path = network_config_path;
 	}
@@ -2175,6 +2180,8 @@ void Testbed::reset_network(bool clear_density_grid) {
 	// Start with a low rendering resolution and gradually ramp up
 	m_render_ms.set(10000);
 
+	m_train_aborting = false;
+
 	reset_accumulation();
 	m_nerf.training.counters_rgb.rays_per_batch = 1 << 12;
 	m_nerf.training.counters_rgb.measured_batch_size_before_compaction = 0;
@@ -2285,6 +2292,15 @@ void Testbed::reset_network(bool clear_density_grid) {
 		m_encoding = m_nerf_network->encoding();
 		n_encoding_params = m_encoding->n_params() + m_nerf_network->dir_encoding()->n_params();
 
+		if (m_encoding != nullptr) {
+			// tlog::info() << "Grid encoding layers";
+			// tlog::info() << "  input_width: " << dynamic_cast<GridEncoding<network_precision_t>*>(m_encoding.get())->input_width();
+			// tlog::info() << "  max_level: " << dynamic_cast<GridEncoding<network_precision_t>*>(m_encoding.get())->max_level();
+			// tlog::info() << "  params at lv0: " << dynamic_cast<GridEncoding<network_precision_t>*>(m_encoding.get())->level_n_params(0);
+			// tlog::info() << "  pos_encoding_n_params: " << m_encoding->n_params();
+			// tlog::info() << "  dir_encoding_n_params: " << m_nerf_network->dir_encoding()->n_params();
+		}
+		
 		tlog::info()
 			<< "Density model: " << dims.n_pos
 			<< "--[" << std::string(encoding_config["otype"])
@@ -2292,7 +2308,15 @@ void Testbed::reset_network(bool clear_density_grid) {
 			<< "--[" << std::string(network_config["otype"])
 			<< "(neurons=" << (int)network_config["n_neurons"] << ",layers=" << ((int)network_config["n_hidden_layers"]+2) << ")"
 			<< "]-->" << 1
+			<< ", params: " << m_nerf_network->m_density_network->n_params()
 			;
+		
+		if (m_nerf_network != nullptr) {
+			tlog::info() << "Layers";
+			for (auto e : m_nerf_network->m_density_network->layer_sizes()) {
+				tlog::info() << "  [" << e.second << ", " << e.first << "]";
+			}
+		}
 
 		tlog::info()
 			<< "Color model:   " << n_dir_dims
@@ -2301,8 +2325,16 @@ void Testbed::reset_network(bool clear_density_grid) {
 			<< "--[" << std::string(rgb_network_config["otype"])
 			<< "(neurons=" << (int)rgb_network_config["n_neurons"] << ",layers=" << ((int)rgb_network_config["n_hidden_layers"]+2) << ")"
 			<< "]-->" << 3
+			<< ", params: " << m_nerf_network->m_rgb_network->n_params()
+			<< ", input dim: " << m_nerf_network->m_rgb_network_input_width
 			;
 
+		if (m_nerf_network != nullptr) {
+			tlog::info() << "Layers";
+			for (auto e : m_nerf_network->m_rgb_network->layer_sizes()) {
+				tlog::info() << "  [" << e.second << ", " << e.first << "]";
+			}
+		}
 		// Create distortion map model
 		{
 			json& distortion_map_optimizer_config =  config.contains("distortion_map") && config["distortion_map"].contains("optimizer") ? config["distortion_map"]["optimizer"] : optimizer_config;
@@ -2450,11 +2482,14 @@ void Testbed::train(uint32_t batch_size) {
 		return;
 	}
 
+	m_timer.m_nerf_reset_accumulation_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	if (!m_dlss) {
 		// No immediate redraw necessary
 		reset_accumulation(false, false);
 	}
+	m_timer.m_nerf_reset_accumulation_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 
+	m_timer.m_nerf_train_prep_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	uint32_t n_prep_to_skip = m_testbed_mode == ETestbedMode::Nerf ? tcnn::clamp(m_training_step / 16u, 1u, 16u) : 1u;
 	if (m_training_step % n_prep_to_skip == 0) {
 		auto start = std::chrono::steady_clock::now();
@@ -2472,7 +2507,10 @@ void Testbed::train(uint32_t batch_size) {
 
 		CUDA_CHECK_THROW(cudaStreamSynchronize(m_stream.get()));
 	}
+	m_timer.m_nerf_train_prep_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
+	m_mem_tracker.m_nerf_train_prep_end = get_allocatd_momory_size();
 
+	m_timer.m_nerf_update_hyperparam_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	// Find leaf optimizer and update its settings
 	json* leaf_optimizer_config = &m_network_config["optimizer"];
 	while (leaf_optimizer_config->contains("nested")) {
@@ -2481,6 +2519,7 @@ void Testbed::train(uint32_t batch_size) {
 	(*leaf_optimizer_config)["optimize_matrix_params"] = m_train_network;
 	(*leaf_optimizer_config)["optimize_non_matrix_params"] = m_train_encoding;
 	m_optimizer->update_hyperparams(m_network_config["optimizer"]);
+	m_timer.m_nerf_update_hyperparam_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 
 	bool get_loss_scalar = m_training_step % 16 == 0;
 
@@ -2501,9 +2540,11 @@ void Testbed::train(uint32_t batch_size) {
 		CUDA_CHECK_THROW(cudaStreamSynchronize(m_stream.get()));
 	}
 
+	m_timer.m_nerf_update_loss_graph_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	if (get_loss_scalar) {
 		update_loss_graph();
 	}
+	m_timer.m_nerf_update_loss_graph_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 }
 
 Vector2f Testbed::calc_focal_length(const Vector2i& resolution, int fov_axis, float zoom) const {
@@ -2939,6 +2980,8 @@ void Testbed::save_snapshot(const std::string& filepath_string, bool include_opt
 }
 
 void Testbed::load_snapshot(const std::string& filepath_string) {
+	m_mem_tracker.m_base = get_allocatd_momory_size();
+
 	auto config = load_network_config(filepath_string);
 	if (!config.contains("snapshot")) {
 		throw std::runtime_error{fmt::format("File {} does not contain a snapshot.", filepath_string)};
