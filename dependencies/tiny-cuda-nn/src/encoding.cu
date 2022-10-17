@@ -38,7 +38,6 @@
 #include <tiny-cuda-nn/encodings/spherical_harmonics.h>
 #include <tiny-cuda-nn/encodings/triangle_wave.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 InterpolationType string_to_interpolation_type(const std::string& interpolation_type) {
@@ -59,27 +58,6 @@ std::string to_string(InterpolationType interpolation_type) {
 		case InterpolationType::Linear: return "Linear";
 		case InterpolationType::Smoothstep: return "Smoothstep";
 		default: throw std::runtime_error{"Invalid interpolation type."};
-	}
-}
-
-ReductionType string_to_reduction_type(const std::string& reduction_type) {
-	if (equals_case_insensitive(reduction_type, "Concatenation")) {
-		return ReductionType::Concatenation;
-	} else if (equals_case_insensitive(reduction_type, "Sum")) {
-		return ReductionType::Sum;
-	} else if (equals_case_insensitive(reduction_type, "Product")) {
-		return ReductionType::Product;
-	}
-
-	throw std::runtime_error{fmt::format("Invalid reduction type: {}", reduction_type)};
-}
-
-std::string to_string(ReductionType reduction_type) {
-	switch (reduction_type) {
-		case ReductionType::Concatenation: return "Concatenation";
-		case ReductionType::Sum: return "Sum";
-		case ReductionType::Product: return "Product";
-		default: throw std::runtime_error{"Invalid reduction type."};
 	}
 }
 
@@ -143,7 +121,8 @@ Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, ui
 		equals_case_insensitive(encoding_type, "Grid") ||
 		equals_case_insensitive(encoding_type, "HashGrid") ||
 		equals_case_insensitive(encoding_type, "TiledGrid") ||
-		equals_case_insensitive(encoding_type, "DenseGrid")
+		equals_case_insensitive(encoding_type, "DenseGrid") ||
+		equals_case_insensitive(encoding_type, "WindowGrid")
 	) {
 		result = create_grid_encoding<T>(n_dims_to_encode, encoding);
 	} else {
