@@ -2537,10 +2537,11 @@ void Testbed::train(uint32_t batch_size) {
 			default: throw std::runtime_error{"Invalid training mode."};
 		}
 
+		m_timer.m_nerf_update_loss_graph_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 		CUDA_CHECK_THROW(cudaStreamSynchronize(m_stream.get()));
 	}
 
-	m_timer.m_nerf_update_loss_graph_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
+	
 	if (get_loss_scalar) {
 		update_loss_graph();
 	}

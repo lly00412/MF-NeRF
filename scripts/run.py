@@ -211,48 +211,65 @@ if __name__ == "__main__":
 				# f_loss.backward()
 				# optimizer.step()
 				if args.profile:
-					profiling_data.append([testbed.m_timer.m_nerf_reset_accumulation_start,
-											testbed.m_timer.m_nerf_reset_accumulation_end,
-											testbed.m_timer.m_nerf_train_prep_start,
-											testbed.m_timer.m_nerf_train_prep_end,
-											testbed.m_timer.m_nerf_update_hyperparam_start,
-											testbed.m_timer.m_nerf_update_hyperparam_end,
-											testbed.m_timer.m_nerf_i_dont_know1_start,
-											testbed.m_timer.m_nerf_i_dont_know1_end,
-											testbed.m_timer.m_nerf_train_start,
-											testbed.m_timer.m_nerf_train_sampling_start,
-											testbed.m_timer.m_nerf_train_sampling_end,
-											testbed.m_timer.m_nerf_train_inference_start,
-											testbed.m_timer.m_nerf_train_inference_end,
-											testbed.m_timer.m_nerf_train_loss_start,
-											testbed.m_timer.m_nerf_train_loss_end,
-											testbed.m_timer.m_nerf_train_forward,
-											testbed.m_timer.m_nerf_train_backward,
-											testbed.m_timer.m_nerf_train_backward_end,
-											testbed.m_timer.m_nerf_train_end,
-											testbed.m_timer.m_nerf_optimizer_start,
-											testbed.m_timer.m_nerf_optimizer_end,
-											testbed.m_timer.m_nerf_envmap_start,
-											testbed.m_timer.m_nerf_envmap_end,
-											testbed.m_timer.m_nerf_rgb_loss_scalar_start,
-											testbed.m_timer.m_nerf_rgb_loss_scalar_end,
-											testbed.m_timer.m_nerf_compute_cdf_start,
-											testbed.m_timer.m_nerf_compute_cdf_end,
-											testbed.m_timer.m_nerf_train_extra_dims_start,
-											testbed.m_timer.m_nerf_train_extra_dims_end,
-											testbed.m_timer.m_nerf_train_camera_start,
-											testbed.m_timer.m_nerf_train_camera_end,
-											testbed.m_timer.m_nerf_update_loss_graph_start,
-											testbed.m_timer.m_nerf_update_loss_graph_end,
-											testbed.m_mem_tracker.m_base,
-											testbed.m_mem_tracker.m_nerf_train_prep_end,
-											testbed.m_mem_tracker.m_nerf_train_sampling_end,
-											testbed.m_mem_tracker.m_nerf_train_inference_end,
-											testbed.m_mem_tracker.m_nerf_train_loss_end,
-											testbed.m_mem_tracker.m_nerf_train_forward_end,
-											testbed.m_mem_tracker.m_nerf_train_backward_end,
-											testbed.m_mem_tracker.m_nerf_optimizer_end
-											])
+					profiling_data.append([
+						testbed.m_timer.m_nerf_reset_accumulation_start,
+						testbed.m_timer.m_nerf_reset_accumulation_end,
+						testbed.m_timer.m_nerf_reset_accumulation_end - testbed.m_timer.m_nerf_reset_accumulation_start,
+						testbed.m_timer.m_nerf_train_prep_start,
+						testbed.m_timer.m_nerf_train_prep_end,
+						testbed.m_timer.m_nerf_train_prep_end - testbed.m_timer.m_nerf_train_prep_start,
+						testbed.m_timer.m_nerf_update_hyperparam_start,
+						testbed.m_timer.m_nerf_update_hyperparam_end,
+						testbed.m_timer.m_nerf_update_hyperparam_end - testbed.m_timer.m_nerf_update_hyperparam_start,
+						testbed.m_timer.m_nerf_i_dont_know1_start,
+						testbed.m_timer.m_nerf_i_dont_know1_end,
+						testbed.m_timer.m_nerf_i_dont_know1_end - testbed.m_timer.m_nerf_i_dont_know1_start,
+						testbed.m_timer.m_nerf_train_start,
+						testbed.m_timer.m_nerf_train_sampling_start,
+						testbed.m_timer.m_nerf_train_sampling_end,
+						testbed.m_timer.m_nerf_train_sampling_end - testbed.m_timer.m_nerf_train_sampling_start,
+						testbed.m_timer.m_nerf_train_inference_start,
+						testbed.m_timer.m_nerf_train_inference_end,
+						testbed.m_timer.m_nerf_train_inference_end - testbed.m_timer.m_nerf_train_inference_start,
+						testbed.m_timer.m_nerf_train_loss_start,
+						testbed.m_timer.m_nerf_train_loss_end,
+						testbed.m_timer.m_nerf_train_loss_end - testbed.m_timer.m_nerf_train_loss_start,
+						testbed.m_timer.m_nerf_train_forward,
+						testbed.m_timer.m_nerf_train_backward,
+						testbed.m_timer.m_nerf_train_backward - testbed.m_timer.m_nerf_train_forward,
+						testbed.m_timer.m_nerf_train_backward_end,
+						testbed.m_timer.m_nerf_train_backward_end - testbed.m_timer.m_nerf_train_backward,
+						testbed.m_timer.m_nerf_train_end,
+						testbed.m_timer.m_nerf_optimizer_start,
+						testbed.m_timer.m_nerf_optimizer_end,
+						testbed.m_timer.m_nerf_optimizer_end - testbed.m_timer.m_nerf_optimizer_start,
+						testbed.m_timer.m_nerf_envmap_start,
+						testbed.m_timer.m_nerf_envmap_end,
+						testbed.m_timer.m_nerf_envmap_end - testbed.m_timer.m_nerf_envmap_start,
+						testbed.m_timer.m_nerf_rgb_loss_scalar_start,
+						testbed.m_timer.m_nerf_rgb_loss_scalar_end,
+						testbed.m_timer.m_nerf_rgb_loss_scalar_end - testbed.m_timer.m_nerf_rgb_loss_scalar_start,
+						testbed.m_timer.m_nerf_compute_cdf_start,
+						testbed.m_timer.m_nerf_compute_cdf_end,
+						testbed.m_timer.m_nerf_compute_cdf_end - testbed.m_timer.m_nerf_compute_cdf_start,
+						testbed.m_timer.m_nerf_train_extra_dims_start,
+						testbed.m_timer.m_nerf_train_extra_dims_end,
+						testbed.m_timer.m_nerf_train_extra_dims_end - testbed.m_timer.m_nerf_train_extra_dims_start,
+						testbed.m_timer.m_nerf_train_camera_start,
+						testbed.m_timer.m_nerf_train_camera_end,
+						testbed.m_timer.m_nerf_train_camera_end - testbed.m_timer.m_nerf_train_camera_start,
+						testbed.m_timer.m_nerf_update_loss_graph_start,
+						testbed.m_timer.m_nerf_update_loss_graph_end,
+						testbed.m_timer.m_nerf_update_loss_graph_end - testbed.m_timer.m_nerf_update_loss_graph_start,
+						testbed.m_mem_tracker.m_base,
+						testbed.m_mem_tracker.m_nerf_train_prep_end,
+						testbed.m_mem_tracker.m_nerf_train_sampling_end,
+						testbed.m_mem_tracker.m_nerf_train_inference_end,
+						testbed.m_mem_tracker.m_nerf_train_loss_end,
+						testbed.m_mem_tracker.m_nerf_train_forward_end,
+						testbed.m_mem_tracker.m_nerf_train_backward_end,
+						testbed.m_mem_tracker.m_nerf_optimizer_end
+						])
 
 				if testbed.want_repl():
 					repl(testbed)
@@ -380,47 +397,63 @@ if __name__ == "__main__":
 	if args.profile:
 		with open(os.path.join(args.profile, 'profiles.csv'), 'w', newline='') as f:
 			w = csv.writer(f)
-			w.writerow(['T_m_nerf_reset_accumulation_start',
-						'T_m_nerf_reset_accumulation_end',
-						'T_m_nerf_train_prep_start',
-						'T_m_nerf_train_prep_end',
-						'T_m_nerf_update_hyperparam_start',
-						'T_m_nerf_update_hyperparam_end',
-						'T_m_nerf_i_dont_know1_start',
-						'T_m_nerf_i_dont_know1_end',
-						'T_m_nerf_train_start',
-						'T_m_nerf_train_sampling_start',
-						'T_m_nerf_train_sampling_end',
-						'T_m_nerf_train_inference_start',
-						'T_m_nerf_train_inference_end',
-						'T_m_nerf_train_loss_start',
-						'T_m_nerf_train_loss_end',
-						'T_m_nerf_train_forward',
-						'T_m_nerf_train_backward',
-						'T_m_nerf_train_backward_end',
-						'T_m_nerf_train_end',
-						'T_m_nerf_optimizer_start',
-						'T_m_nerf_optimizer_end',
-						'T_m_nerf_envmap_start',
-						'T_m_nerf_envmap_end',
-						'T_m_nerf_rgb_loss_scalar_start',
-						'T_m_nerf_rgb_loss_scalar_end',
-						'T_m_nerf_compute_cdf_start',
-						'T_m_nerf_compute_cdf_end',
-						'T_m_nerf_train_extra_dims_start',
-						'T_m_nerf_train_extra_dims_end',
-						'T_m_nerf_train_camera_start',
-						'T_m_nerf_train_camera_end',
-						'T_m_nerf_update_loss_graph_start',
-						'T_m_nerf_update_loss_graph_end',
-						'M_m_base',
-						'M_m_nerf_train_prep_end',
-						'M_m_nerf_train_sampling_end',
-						'M_m_nerf_train_inference_end',
-						'M_m_nerf_train_loss_end',
-						'M_m_nerf_train_forward_end',
-						'M_m_nerf_train_backward_end',
-						'M_m_nerf_optimizer_end',
+			w.writerow(['T_m_nerf_reset_accumulation_start', 	# 0
+						'T_m_nerf_reset_accumulation_end',		# 1
+						'Accumulation',							# 1 - 0
+						'T_m_nerf_train_prep_start',			# 2
+						'T_m_nerf_train_prep_end',				# 3
+						'Train_prep',							# 3 - 2
+						'T_m_nerf_update_hyperparam_start',		# 4
+						'T_m_nerf_update_hyperparam_end',		# 5
+						'Update_hyparam',						# 5 - 4
+						'T_m_nerf_i_dont_know1_start',			# 6
+						'T_m_nerf_i_dont_know1_end',			# 7
+						'I_dont_know',							# 7 - 6
+						'T_m_nerf_train_start',					# 8
+						'T_m_nerf_train_sampling_start',		# 9
+						'T_m_nerf_train_sampling_end',			# 10
+						'Smapling',								# 10 - 9
+						'T_m_nerf_train_inference_start',		# 11
+						'T_m_nerf_train_inference_end',			# 12
+						'Inference',							# 12 - 11
+						'T_m_nerf_train_loss_start',			# 13
+						'T_m_nerf_train_loss_end',				# 14
+						'Loss', 								# 14 - 13
+						'T_m_nerf_train_forward',				# 15
+						'T_m_nerf_train_backward',				# 16
+						'Forward',								# 16 - 15
+						'T_m_nerf_train_backward_end',			# 17
+						'Backward',								# 17 - 16
+						'T_m_nerf_train_end',					# 18
+						'T_m_nerf_optimizer_start',				# 19
+						'T_m_nerf_optimizer_end',				# 20
+						'Optimizer',							# 20 - 19
+						'T_m_nerf_envmap_start',				# 21
+						'T_m_nerf_envmap_end',					# 22
+						'Envmap',								# 22 - 21
+						'T_m_nerf_rgb_loss_scalar_start',		# 23
+						'T_m_nerf_rgb_loss_scalar_end',			# 24
+						'Loss_scalar',							# 24 - 23
+						'T_m_nerf_compute_cdf_start',			# 25
+						'T_m_nerf_compute_cdf_end',				# 26
+						'Compute_cdf',							# 26 - 25
+						'T_m_nerf_train_extra_dims_start',		# 27
+						'T_m_nerf_train_extra_dims_end',		# 28
+						'Extra_dims',							# 28 - 27
+						'T_m_nerf_train_camera_start',			# 29
+						'T_m_nerf_train_camera_end',			# 30
+						'Train_camera',							# 30 - 29
+						'T_m_nerf_update_loss_graph_start',		# 31
+						'T_m_nerf_update_loss_graph_end',		# 32
+						'Loss_graph',							# 32 - 31
+						'M_m_base',								# 33
+						'M_m_nerf_train_prep_end',				# 34
+						'M_m_nerf_train_sampling_end',			# 35
+						'M_m_nerf_train_inference_end',			# 36
+						'M_m_nerf_train_loss_end',				# 37
+						'M_m_nerf_train_forward_end',			# 38
+						'M_m_nerf_train_backward_end',			# 39
+						'M_m_nerf_optimizer_end',				# 40
 						])
 			w.writerows(profiling_data)
 
