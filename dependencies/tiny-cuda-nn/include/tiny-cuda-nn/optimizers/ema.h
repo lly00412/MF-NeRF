@@ -84,18 +84,20 @@ public:
 		update_hyperparams(params);
 	}
 
-	void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
-		m_nested->allocate(n_weights, layer_sizes);
+	void allocate(std::shared_ptr<ParametricObject<T>> target) override {
+		m_nested->allocate(target);
 
-		if (n_weights <= m_weights_ema.size()) {
+		uint32_t size = (uint32_t)target->n_params();
+
+		if (size <= m_weights_ema.size()) {
 			return;
 		}
 
-		m_weights_ema.resize(n_weights);
+		m_weights_ema.resize(size);
 		m_weights_ema.memset(0);
 
 		if (m_full_precision) {
-			m_tmp.resize(n_weights);
+			m_tmp.resize(size);
 			m_tmp.memset(0);
 		}
 	}
@@ -156,14 +158,6 @@ public:
 		return m_weights_ema.data();
 	}
 
-	bool supports_nesting() const override {
-		return true;
-	}
-
-	const std::shared_ptr<Optimizer<T>>& nested() const override {
-		return m_nested;
-	}
-
 	void update_hyperparams(const json& params) override {
 		if (params.contains("decay")) {
 			m_ema_decay = params["decay"];
@@ -196,19 +190,17 @@ public:
 
 	void deserialize(const json& data) override {
 		m_weights_ema = data["weights_ema_binary"];
-
 		if (m_full_precision) {
 			m_tmp.resize(m_weights_ema.size());
 			linear_kernel(cast_from<T>, 0, nullptr, m_weights_ema.size(), m_weights_ema.data(), m_tmp.data());
 		}
-
 		m_nested->deserialize(data["nested"]);
 	}
 
 private:
 	float m_ema_decay = 0.99f;
 	bool m_full_precision = false;
-	std::shared_ptr<Optimizer<T>> m_nested;
+	std::unique_ptr<Optimizer<T>> m_nested;
 
 	GPUMemory<T> m_weights_ema;
 	GPUMemory<float> m_tmp;

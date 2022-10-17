@@ -69,11 +69,13 @@ public:
 		update_hyperparams(params);
 	}
 
-	void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
-		m_nested->allocate(n_weights, layer_sizes);
+	void allocate(std::shared_ptr<ParametricObject<T>> target) override {
+		m_nested->allocate(target);
 
-		m_averaged_gradients.resize(n_weights);
-		m_averaged_gradients_half.resize(n_weights);
+		uint32_t size = (uint32_t)target->n_params();
+
+		m_averaged_gradients.resize(size);
+		m_averaged_gradients_half.resize(size);
 	}
 
 	void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) override {
@@ -107,14 +109,6 @@ public:
 
 	T* custom_weights() const override {
 		return m_nested->custom_weights();
-	}
-
-	bool supports_nesting() const override {
-		return true;
-	}
-
-	const std::shared_ptr<Optimizer<T>>& nested() const override {
-		return m_nested;
 	}
 
 	void update_hyperparams(const json& params) override {
@@ -153,7 +147,7 @@ public:
 
 private:
 	uint32_t m_batch_size_multiplier = 16;
-	std::shared_ptr<Optimizer<T>> m_nested;
+	std::unique_ptr<Optimizer<T>> m_nested;
 
 	GPUMemory<float> m_averaged_gradients;
 	GPUMemory<T> m_averaged_gradients_half;

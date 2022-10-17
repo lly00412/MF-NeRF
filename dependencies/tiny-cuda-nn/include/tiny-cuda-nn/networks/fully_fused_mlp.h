@@ -121,12 +121,8 @@ public:
 		return m_output_width;
 	}
 
-	static uint32_t REQUIRED_ALIGNMENT() {
-		return 16; // Uses 16x16x16 tensor ops
-	}
-
 	uint32_t required_input_alignment() const override {
-		return REQUIRED_ALIGNMENT();
+		return tensorcore_width;
 	}
 
 	std::vector<std::pair<uint32_t, uint32_t>> layer_sizes() const override {
@@ -180,6 +176,8 @@ private:
 	Activation m_output_activation;
 
 	bool m_use_feedback_alignment = false;
+
+	static const uint32_t tensorcore_width = 16;
 
 	// Storage of params
 	std::vector<GPUMatrix<T, RM>> m_weight_matrices;

@@ -47,16 +47,6 @@ InterpolationType string_to_interpolation_type(const std::string& interpolation_
 
 std::string to_string(InterpolationType interpolation_type);
 
-enum class ReductionType {
-	Concatenation,
-	Sum,
-	Product,
-};
-
-ReductionType string_to_reduction_type(const std::string& reduction_type);
-
-std::string to_string(ReductionType reduction_type);
-
 template <typename T>
 class Encoding : public DifferentiableObject<float, T, T> {
 public:
@@ -71,8 +61,8 @@ public:
 		this->forward(stream, input, &output, use_inference_params, false);
 	}
 
-	virtual void set_padded_output_width(uint32_t padded_output_width) = 0;
-	virtual uint32_t required_output_alignment() const = 0;
+	virtual void set_alignment(uint32_t alignment) = 0;
+	virtual uint32_t min_alignment() const = 0;
 
 	virtual MatrixLayout preferred_output_layout() const = 0;
 
@@ -82,10 +72,6 @@ public:
 	size_t n_params() const override { return 0; }
 
 	std::vector<std::pair<uint32_t, uint32_t>> layer_sizes() const override { return {}; }
-
-	void set_alignment(uint32_t alignment) {
-		this->set_padded_output_width(next_multiple(this->output_width(), lcm(alignment, this->required_output_alignment())));
-	}
 };
 
 template <typename T>

@@ -56,7 +56,6 @@ enum class GridType {
 	Hash,
 	Dense,
 	Tiled,
-	Window,
 };
 
 inline GridType string_to_grid_type(const std::string& grid_type) {
@@ -66,8 +65,6 @@ inline GridType string_to_grid_type(const std::string& grid_type) {
 		return GridType::Dense;
 	} else if (equals_case_insensitive(grid_type, "Tiled") || equals_case_insensitive(grid_type, "Tile")) {
 		return GridType::Tiled;
-	} else if (equals_case_insensitive(grid_type, "Window")) {
-		return GridType::Window;
 	}
 
 	throw std::runtime_error{fmt::format("Invalid grid type: {}", grid_type)};
@@ -78,7 +75,6 @@ inline std::string to_string(GridType grid_type) {
 		case GridType::Hash: return "Hash";
 		case GridType::Dense: return "Dense";
 		case GridType::Tiled: return "Tiled";
-		case GridType::Window: return "Window";
 		default: throw std::runtime_error{"Invalid grid type."};
 	}
 }
@@ -113,7 +109,7 @@ __device__ uint32_t grid_index(const GridType grid_type, const uint32_t feature,
 		stride *= grid_resolution;
 	}
 
-	if ((grid_type == GridType::Hash || grid_type == GridType::Window) && hashmap_size < stride) {
+	if (grid_type == GridType::Hash && hashmap_size < stride) {
 		index = fast_hash<N_DIMS>(pos_grid);
 	}
 
@@ -125,7 +121,6 @@ __device__ inline float random_val(uint32_t seed, uint32_t idx) {
 	return rng.next_float();
 }
 
-// Unused function
 template <typename T>
 __global__ void extract_position(
 	const uint32_t num_elements,
@@ -140,16 +135,12 @@ __global__ void extract_position(
 	output[i + dim_idx * num_elements] = (T)data_in(i)[dim_idx];
 }
 
-// kernel_grid : interpolate 8 vertices of a point in a grid cell at a specific level.
-// N_POS_DIMS = 3
-// N_FEATUES_PER_LEVEL = 2
 template <typename T, uint32_t N_POS_DIMS, uint32_t N_FEATURES_PER_LEVEL>
 __global__ void kernel_grid(
 	const uint32_t num_elements,
 	const uint32_t num_grid_features,
 	const GridOffsetTable offset_table,
 	const uint32_t base_resolution,
-	const uint32_t max_resolution,
 	const float log2_per_level_scale,
 	const float quantize_threshold,
 	float max_level,
@@ -161,14 +152,11 @@ __global__ void kernel_grid(
 	T* __restrict__ encoded_positions,
 	float* __restrict__ dy_dx
 ) {
-	const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x; // i = thread number
+	const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= num_elements) return;
 
 	const uint32_t level = blockIdx.y; // <- the level is the same for all threads
 
-	// max_level = 1000.f	<- batch size ???
-	// max_level_gpu[] = ???
-	// num_grid_features = 2 * 16
 	if (max_level_gpu) {
 		max_level = (max_level_gpu[i] * num_grid_features) / N_FEATURES_PER_LEVEL;
 	} else {
@@ -194,25 +182,16 @@ __global__ void kernel_grid(
 		return;
 	}
 
-	// grid : pointer to first item of the nth level grid.
-	uint32_t hashmap_size;
-	if (grid_type == GridType::Window) {
-		hashmap_size = offset_table.data[1] - offset_table.data[0];
-	} else {
-		grid += offset_table.data[level] * N_FEATURES_PER_LEVEL;
-		hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
-	}
+	grid += offset_table.data[level] * N_FEATURES_PER_LEVEL;
+	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
 
-	// log2_per_level_scale = log2(1.38191)
 	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
 	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
-	// L=16, Nmin=16, Nmax=2048 => grid_resolution = 23, when L1
 
 	float pos[N_POS_DIMS];
 	float pos_derivative[N_POS_DIMS];
 	uint32_t pos_grid[N_POS_DIMS];
 
-	// ???
 	if (interpolation_type == InterpolationType::Nearest || interpolation_type == InterpolationType::Linear) {
 		#pragma unroll
 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
@@ -230,8 +209,6 @@ __global__ void kernel_grid(
 		return *(vector_t<T, N_FEATURES_PER_LEVEL>*)&grid[index];
 	};
 
-	// ??? pos_grid : x, y, z coordiantes of a vertex at a certain grid level
-	// We are not using Nearest interpolation. Skip this conditional branch.
 	if (interpolation_type == InterpolationType::Nearest) {
 		auto result = grid_val(pos_grid);
 
@@ -273,12 +250,6 @@ __global__ void kernel_grid(
 				}
 			}
 
-			if (grid_type == GridType::Window) {
-				#pragma unroll
-				for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-					pos_grid_local[dim] = (uint32_t)floor(pos_grid_local[dim] * max_resolution / grid_resolution);
-				}
-			}
 			auto val = grid_val(pos_grid_local);
 
 			#pragma unroll
@@ -320,24 +291,9 @@ __global__ void kernel_grid(
 				}
 
 				pos_grid_local[grad_dim] = pos_grid[grad_dim];
-				uint32_t lpgl[N_POS_DIMS];
-				if (grid_type == GridType::Window) {
-					#pragma unroll
-					for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-						lpgl[dim] = (uint32_t)floor(pos_grid_local[dim] * max_resolution / grid_resolution);
-					}
-				}
-				auto val_left = grid_type == GridType::Window ? grid_val(lpgl) : grid_val(pos_grid_local);
-				
+				auto val_left = grid_val(pos_grid_local);
 				pos_grid_local[grad_dim] = pos_grid[grad_dim] + 1;
-				uint32_t rpgl[N_POS_DIMS];
-				if (grid_type == GridType::Window) {
-					#pragma unroll
-					for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-						rpgl[dim] = (uint32_t)floor(pos_grid_local[dim] * max_resolution / grid_resolution);
-					}
-				}
-				auto val_right = grid_type == GridType::Window ? grid_val(rpgl) : grid_val(pos_grid_local);
+				auto val_right = grid_val(pos_grid_local);
 
 				#pragma unroll
 				for (uint32_t feature = 0; feature < N_FEATURES_PER_LEVEL; ++feature) {
@@ -353,14 +309,12 @@ __global__ void kernel_grid(
 	}
 }
 
-// backward propagation implementation to the kernel_grid
 template <typename T, typename GRAD_T, uint32_t N_POS_DIMS, uint32_t N_FEATURES_PER_LEVEL, uint32_t N_FEATURES_PER_THREAD>
 __global__ void kernel_grid_backward(
 	const uint32_t num_elements,
 	const uint32_t num_grid_features,
 	const GridOffsetTable offset_table,
 	const uint32_t base_resolution,
-	const uint32_t max_resolution,
 	const float log2_per_level_scale,
 	float max_level,
 	const float* __restrict__ max_level_gpu,
@@ -387,13 +341,8 @@ __global__ void kernel_grid_backward(
 		return;
 	}
 
-	uint32_t hashmap_size;
-	if (grid_type == GridType::Window) {
-		hashmap_size = offset_table.data[1] - offset_table.data[0];
-	} else {
-		grid_gradient += offset_table.data[level] * N_FEATURES_PER_LEVEL;
-		hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
-	}
+	grid_gradient += offset_table.data[level] * N_FEATURES_PER_LEVEL;
+	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
 
 	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
 	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
@@ -481,18 +430,10 @@ __global__ void kernel_grid_backward(
 			}
 		}
 
-		if (grid_type == GridType::Window) {
-			#pragma unroll
-			for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-				pos_grid_local[dim] = (uint32_t)floor(pos_grid_local[dim] * max_resolution / grid_resolution);
-			}
-		}
-
 		add_grid_gradient(pos_grid_local, grad, weight);
 	}
 }
 
-// Transpose result (was stored row major due to coalescing)
 template <typename T>
 __global__ void transpose_encoded_position(
 	const uint32_t n_elements,
@@ -508,7 +449,6 @@ __global__ void transpose_encoded_position(
 	output(elem_idx)[dim_idx] = encoded_positions[elem_idx + n_elements * dim_idx];
 }
 
-// if (dL_doutput.layout() == CM) then transpose_gradients()
 template <typename T>
 __global__ void transpose_gradients(
 	const uint32_t n_elements,
@@ -553,324 +493,322 @@ __global__ void kernel_grid_backward_input(
 	}
 }
 
-// // from dL_d(dL_dx) to dL_dgrid
-// template <typename T, typename GRAD_T, uint32_t N_POS_DIMS, uint32_t N_FEATURES_PER_LEVEL, uint32_t N_FEATURES_PER_THREAD>
-// __global__ void kernel_grid_backward_input_backward_grid(
-// 	const uint32_t num_elements,
-// 	const uint32_t num_grid_features,
-// 	const GridOffsetTable offset_table,
-// 	const uint32_t base_resolution,
-// 	const float log2_per_level_scale,
-// 	float max_level,
-// 	const float* __restrict__ max_level_gpu,
-// 	// const bool stochastic_interpolation, // TODO: is this needed?
-// 	const InterpolationType interpolation_type,
-// 	const GridType grid_type,
-// 	// inputs
-// 	MatrixView<const float> dL_ddLdx,
-// 	MatrixView<const float> positions_in,
-// 	const T* __restrict__ dL_dy,
-// 	// outputs
-// 	GRAD_T* __restrict__ grid_gradient
-// ) {
-// 	const uint32_t i = ((blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD) / N_FEATURES_PER_LEVEL;
-// 	if (i >= num_elements) return;
+template <typename T, typename GRAD_T, uint32_t N_POS_DIMS, uint32_t N_FEATURES_PER_LEVEL, uint32_t N_FEATURES_PER_THREAD>
+__global__ void kernel_grid_backward_input_backward_grid(
+	const uint32_t num_elements,
+	const uint32_t num_grid_features,
+	const GridOffsetTable offset_table,
+	const uint32_t base_resolution,
+	const float log2_per_level_scale,
+	float max_level,
+	const float* __restrict__ max_level_gpu,
+	// const bool stochastic_interpolation, // TODO: is this needed?
+	const InterpolationType interpolation_type,
+	const GridType grid_type,
+	// inputs
+	MatrixView<const float> dL_ddLdx,
+	MatrixView<const float> positions_in,
+	const T* __restrict__ dL_dy,
+	// outputs
+	GRAD_T* __restrict__ grid_gradient
+) {
+	const uint32_t i = ((blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD) / N_FEATURES_PER_LEVEL;
+	if (i >= num_elements) return;
 
-// 	const uint32_t level = blockIdx.y ; // <- the level is the same for all threads.
-// 	const uint32_t feature = (blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD - i * N_FEATURES_PER_LEVEL;
+	const uint32_t level = blockIdx.y ; // <- the level is the same for all threads.
+	const uint32_t feature = (blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD - i * N_FEATURES_PER_LEVEL;
 
-// 	if (max_level_gpu) {
-// 		max_level = (max_level_gpu[i] * num_grid_features) / N_FEATURES_PER_LEVEL;
-// 	} else {
-// 		max_level = (max_level * num_grid_features) / N_FEATURES_PER_LEVEL;
-// 	}
+	if (max_level_gpu) {
+		max_level = (max_level_gpu[i] * num_grid_features) / N_FEATURES_PER_LEVEL;
+	} else {
+		max_level = (max_level * num_grid_features) / N_FEATURES_PER_LEVEL;
+	}
 
-// 	if (level > max_level + 1e-3f) {
-// 		return;
-// 	}
+	if (level > max_level + 1e-3f) {
+		return;
+	}
 
-// 	grid_gradient += offset_table.data[level] * N_FEATURES_PER_LEVEL;
-// 	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
+	grid_gradient += offset_table.data[level] * N_FEATURES_PER_LEVEL;
+	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
 
-// 	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
-// 	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
+	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
+	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
 
-// 	auto add_grid_gradient = [&](const uint32_t local_pos[N_POS_DIMS], const vector_t<T, N_FEATURES_PER_THREAD>& grad, const float weight) {
-// 		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, feature, hashmap_size, grid_resolution, local_pos);
-// #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // atomicAdd(__half2) is only supported with compute capability 60 and above
-// 		if (N_FEATURES_PER_THREAD > 1 && std::is_same<GRAD_T, __half>::value) {
-// 			for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; f += 2) {
-// 				__half2 v = {(__half)((float)grad[f] * weight), (__half)((float)grad[f+1] * weight)};
-// 				atomicAdd((__half2*)&grid_gradient[index + f], v);
-// 			}
-// 		} else
-// #endif
-// 		{
-// 			if (std::is_same<GRAD_T, __half>::value) {
-// 				// Should never happen
-// 				//printf("Attempted to use atomicAdd(__half)\n")
-// 			} else {
-// 				for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; ++f) {
-// 					atomicAdd((float*)&grid_gradient[index + f], (float)grad[f] * weight);
-// 				}
-// 			}
-// 		}
-// 	};
+	auto add_grid_gradient = [&](const uint32_t local_pos[N_POS_DIMS], const vector_t<T, N_FEATURES_PER_THREAD>& grad, const float weight) {
+		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, feature, hashmap_size, grid_resolution, local_pos);
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 600 // atomicAdd(__half2) is only supported with compute capability 60 and above
+		if (N_FEATURES_PER_THREAD > 1 && std::is_same<GRAD_T, __half>::value) {
+			for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; f += 2) {
+				__half2 v = {(__half)((float)grad[f] * weight), (__half)((float)grad[f+1] * weight)};
+				atomicAdd((__half2*)&grid_gradient[index + f], v);
+			}
+		} else
+#endif
+		{
+			if (std::is_same<GRAD_T, __half>::value) {
+				// Should never happen
+				//printf("Attempted to use atomicAdd(__half)\n")
+			} else {
+				for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; ++f) {
+					atomicAdd((float*)&grid_gradient[index + f], (float)grad[f] * weight);
+				}
+			}
+		}
+	};
 
-// 	float pos[N_POS_DIMS];
-// 	float pos_derivative[N_POS_DIMS];
-// 	uint32_t pos_grid[N_POS_DIMS];
+	float pos[N_POS_DIMS];
+	float pos_derivative[N_POS_DIMS];
+	uint32_t pos_grid[N_POS_DIMS];
 
-// 	if (interpolation_type == InterpolationType::Nearest || interpolation_type == InterpolationType::Linear) {
-// 		#pragma unroll
-// 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-// 			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, identity_fun, identity_derivative);
-// 		}
-// 	} else {
-// 		#pragma unroll
-// 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-// 			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, smoothstep, smoothstep_derivative);
-// 		}
-// 	}
+	if (interpolation_type == InterpolationType::Nearest || interpolation_type == InterpolationType::Linear) {
+		#pragma unroll
+		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
+			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, identity_fun, identity_derivative);
+		}
+	} else {
+		#pragma unroll
+		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
+			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_grid[dim], scale, smoothstep, smoothstep_derivative);
+		}
+	}
 
-// 	vector_t<T, N_FEATURES_PER_THREAD> grad;
+	vector_t<T, N_FEATURES_PER_THREAD> grad;
 
-// 	#pragma unroll
-// 	for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; ++f) {
-// 		grad[f] = dL_dy[i + (level * N_FEATURES_PER_LEVEL + feature + f) * num_elements];
-// 	}
+	#pragma unroll
+	for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; ++f) {
+		grad[f] = dL_dy[i + (level * N_FEATURES_PER_LEVEL + feature + f) * num_elements];
+	}
 
-// 	if (interpolation_type == InterpolationType::Nearest) {
-// 		// d(dydx)_dgrid is zero when there's no interpolation.
-// 		return;
-// 	}
+	if (interpolation_type == InterpolationType::Nearest) {
+		// d(dydx)_dgrid is zero when there's no interpolation.
+		return;
+	}
 
-// 	// for N-linear interpolation
-// 	#pragma unroll
-// 	for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
-// 		float grad_in = scale * dL_ddLdx(grad_dim, i) * pos_derivative[grad_dim];
-// 		#pragma unroll
-// 		for (uint32_t idx = 0; idx < (1 << (N_POS_DIMS-1)); ++idx) {
-// 			float weight = grad_in;
-// 			uint32_t pos_grid_local[N_POS_DIMS];
+	// for N-linear interpolation
+	#pragma unroll
+	for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
+		float grad_in = scale * dL_ddLdx(grad_dim, i) * pos_derivative[grad_dim];
+		#pragma unroll
+		for (uint32_t idx = 0; idx < (1 << (N_POS_DIMS-1)); ++idx) {
+			float weight = grad_in;
+			uint32_t pos_grid_local[N_POS_DIMS];
 
-// 			#pragma unroll
-// 			for (uint32_t non_grad_dim = 0; non_grad_dim < N_POS_DIMS-1; ++non_grad_dim) {
-// 				const uint32_t dim = non_grad_dim >= grad_dim ? (non_grad_dim+1) : non_grad_dim;
+			#pragma unroll
+			for (uint32_t non_grad_dim = 0; non_grad_dim < N_POS_DIMS-1; ++non_grad_dim) {
+				const uint32_t dim = non_grad_dim >= grad_dim ? (non_grad_dim+1) : non_grad_dim;
 
-// 				if ((idx & 1<<non_grad_dim) == 0) {
-// 					weight *= 1 - pos[dim];
-// 					pos_grid_local[dim] = pos_grid[dim];
-// 				} else {
-// 					weight *= pos[dim];
-// 					pos_grid_local[dim] = pos_grid[dim] + 1;
-// 				}
-// 			}
+				if ((idx & 1<<non_grad_dim) == 0) {
+					weight *= 1 - pos[dim];
+					pos_grid_local[dim] = pos_grid[dim];
+				} else {
+					weight *= pos[dim];
+					pos_grid_local[dim] = pos_grid[dim] + 1;
+				}
+			}
 
-// 			// left
-// 			pos_grid_local[grad_dim] = pos_grid[grad_dim];
-// 			add_grid_gradient(pos_grid_local, grad, -weight);
-// 			// right
-// 			pos_grid_local[grad_dim] = pos_grid[grad_dim] + 1;
-// 			add_grid_gradient(pos_grid_local, grad, weight);
-// 		}
-// 	}
-// }
+			// left
+			pos_grid_local[grad_dim] = pos_grid[grad_dim];
+			add_grid_gradient(pos_grid_local, grad, -weight);
+			// right
+			pos_grid_local[grad_dim] = pos_grid[grad_dim] + 1;
+			add_grid_gradient(pos_grid_local, grad, weight);
+		}
+	}
+}
 
-// template <typename T, uint32_t N_POS_DIMS, uint32_t N_FEATURES_PER_LEVEL, uint32_t N_FEATURES_PER_THREAD>
-// __global__ void kernel_grid_backward_input_backward_input(
-// 	const uint32_t num_elements,
-// 	const uint32_t num_grid_features,
-// 	const GridOffsetTable offset_table,
-// 	const uint32_t base_resolution,
-// 	const float log2_per_level_scale,
-// 	const float quantize_threshold,
-// 	float max_level,
-// 	const float* __restrict__ max_level_gpu,
-// 	const InterpolationType interpolation_type,
-// 	const GridType grid_type,
-// 	// inputs
-// 	MatrixView<const float> dL_ddLdx,
-// 	MatrixView<const float> positions_in,
-// 	const T* __restrict__ dL_dy,
-// 	const T* __restrict__ grid,
-// 	// outputs
-// 	MatrixView<float> dL_dx
-// ) {
-// 	const uint32_t i = ((blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD) / N_FEATURES_PER_LEVEL;
-// 	if (i >= num_elements) return;
+template <typename T, uint32_t N_POS_DIMS, uint32_t N_FEATURES_PER_LEVEL, uint32_t N_FEATURES_PER_THREAD>
+__global__ void kernel_grid_backward_input_backward_input(
+	const uint32_t num_elements,
+	const uint32_t num_grid_features,
+	const GridOffsetTable offset_table,
+	const uint32_t base_resolution,
+	const float log2_per_level_scale,
+	const float quantize_threshold,
+	float max_level,
+	const float* __restrict__ max_level_gpu,
+	const InterpolationType interpolation_type,
+	const GridType grid_type,
+	// inputs
+	MatrixView<const float> dL_ddLdx,
+	MatrixView<const float> positions_in,
+	const T* __restrict__ dL_dy,
+	const T* __restrict__ grid,
+	// outputs
+	MatrixView<float> dL_dx
+) {
+	const uint32_t i = ((blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD) / N_FEATURES_PER_LEVEL;
+	if (i >= num_elements) return;
 
-// 	const uint32_t level = blockIdx.y ; // <- the level is the same for all threads.
-// 	const uint32_t feature = (blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD - i * N_FEATURES_PER_LEVEL;
+	const uint32_t level = blockIdx.y ; // <- the level is the same for all threads.
+	const uint32_t feature = (blockIdx.x * blockDim.x + threadIdx.x) * N_FEATURES_PER_THREAD - i * N_FEATURES_PER_LEVEL;
 
-// 	if (max_level_gpu) {
-// 		max_level = (max_level_gpu[i] * num_grid_features) / N_FEATURES_PER_LEVEL;
-// 	} else {
-// 		max_level = (max_level * num_grid_features) / N_FEATURES_PER_LEVEL;
-// 	}
+	if (max_level_gpu) {
+		max_level = (max_level_gpu[i] * num_grid_features) / N_FEATURES_PER_LEVEL;
+	} else {
+		max_level = (max_level * num_grid_features) / N_FEATURES_PER_LEVEL;
+	}
 
-// 	if (level > max_level + 1e-3f) {
-// 		return;
-// 	}
+	if (level > max_level + 1e-3f) {
+		return;
+	}
 
-// 	grid += offset_table.data[level] * N_FEATURES_PER_LEVEL;
-// 	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
+	grid += offset_table.data[level] * N_FEATURES_PER_LEVEL;
+	const uint32_t hashmap_size = offset_table.data[level + 1] - offset_table.data[level];
 
-// 	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
-// 	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
+	const float scale = exp2f(level * log2_per_level_scale) * base_resolution - 1.0f;
+	const uint32_t grid_resolution = ((uint32_t)ceil(scale) + 1);
 
-// 	float pos[N_POS_DIMS];
-// 	float pos_derivative[N_POS_DIMS];
-// 	float pos_2nd_derivative[N_POS_DIMS];
-// 	uint32_t pos_grid[N_POS_DIMS];
+	float pos[N_POS_DIMS];
+	float pos_derivative[N_POS_DIMS];
+	float pos_2nd_derivative[N_POS_DIMS];
+	uint32_t pos_grid[N_POS_DIMS];
 
-// 	if (interpolation_type == InterpolationType::Nearest || interpolation_type == InterpolationType::Linear) {
-// 		#pragma unroll
-// 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-// 			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_2nd_derivative[dim], &pos_grid[dim], scale, identity_fun, identity_derivative, identity_2nd_derivative);
-// 		}
-// 	} else {
-// 		#pragma unroll
-// 		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
-// 			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_2nd_derivative[dim], &pos_grid[dim], scale, smoothstep, smoothstep_derivative, smoothstep_2nd_derivative);
-// 		}
-// 	}
+	if (interpolation_type == InterpolationType::Nearest || interpolation_type == InterpolationType::Linear) {
+		#pragma unroll
+		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
+			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_2nd_derivative[dim], &pos_grid[dim], scale, identity_fun, identity_derivative, identity_2nd_derivative);
+		}
+	} else {
+		#pragma unroll
+		for (uint32_t dim = 0; dim < N_POS_DIMS; ++dim) {
+			pos_fract(positions_in(dim, i), &pos[dim], &pos_derivative[dim], &pos_2nd_derivative[dim], &pos_grid[dim], scale, smoothstep, smoothstep_derivative, smoothstep_2nd_derivative);
+		}
+	}
 
-// 	vector_t<T, N_FEATURES_PER_THREAD> grad;
+	vector_t<T, N_FEATURES_PER_THREAD> grad;
 
-// 	#pragma unroll
-// 	for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; ++f) {
-// 		grad[f] = dL_dy[i + (level * N_FEATURES_PER_LEVEL + feature + f) * num_elements];
-// 	}
+	#pragma unroll
+	for (uint32_t f = 0; f < N_FEATURES_PER_THREAD; ++f) {
+		grad[f] = dL_dy[i + (level * N_FEATURES_PER_LEVEL + feature + f) * num_elements];
+	}
 
-// 	if (interpolation_type == InterpolationType::Nearest) {
-// 		// d(dydx)_dx is zero when there's no interpolation
-// 		return;
-// 	}
+	if (interpolation_type == InterpolationType::Nearest) {
+		// d(dydx)_dx is zero when there's no interpolation
+		return;
+	}
 
-// 	// for N-linear interpolation
+	// for N-linear interpolation
 
-// 	auto calc_dLdx = [&](const uint32_t local_pos[N_POS_DIMS], const float weight) {
-// 		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, feature, hashmap_size, grid_resolution, local_pos);
-// 		float dL_dx_dim = 0;
-// 		#pragma unroll
-// 		for (uint32_t f=0; f < N_FEATURES_PER_THREAD; ++f) {
-// 			dL_dx_dim += (float)grid[index + f] * (float)grad[f] * weight;
-// 		}
-// 		return dL_dx_dim;
-// 	};
+	auto calc_dLdx = [&](const uint32_t local_pos[N_POS_DIMS], const float weight) {
+		uint32_t index = grid_index<N_POS_DIMS, N_FEATURES_PER_LEVEL>(grid_type, feature, hashmap_size, grid_resolution, local_pos);
+		float dL_dx_dim = 0;
+		#pragma unroll
+		for (uint32_t f=0; f < N_FEATURES_PER_THREAD; ++f) {
+			dL_dx_dim += (float)grid[index + f] * (float)grad[f] * weight;
+		}
+		return dL_dx_dim;
+	};
 
-// 	vector_t<float, N_POS_DIMS> grad_in_diag;
-// 	vector_t<float, N_POS_DIMS> grad_in_other;
-// 	#pragma unroll
-// 	for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
-// 		// from diagonal part of Hessian
-// 		grad_in_diag[grad_dim] = scale * scale * dL_ddLdx(grad_dim, i) * pos_2nd_derivative[grad_dim];
-// 		// from other part of Hessian
-// 		grad_in_other[grad_dim] = scale * scale * dL_ddLdx(grad_dim, i) * pos_derivative[grad_dim]; // will do " * pos_derivative[real_other_grad_dim] " later
-// 	}
+	vector_t<float, N_POS_DIMS> grad_in_diag;
+	vector_t<float, N_POS_DIMS> grad_in_other;
+	#pragma unroll
+	for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
+		// from diagonal part of Hessian
+		grad_in_diag[grad_dim] = scale * scale * dL_ddLdx(grad_dim, i) * pos_2nd_derivative[grad_dim];
+		// from other part of Hessian
+		grad_in_other[grad_dim] = scale * scale * dL_ddLdx(grad_dim, i) * pos_derivative[grad_dim]; // will do " * pos_derivative[real_other_grad_dim] " later
+	}
 
-// 	static constexpr bool dimension_greater_than_1 = (N_POS_DIMS > 1);
-// 	#pragma unroll
-// 	for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
-// 		float grad_out = 0;
-// 		#pragma unroll
-// 		for (uint32_t idx = 0; idx < (1 << (N_POS_DIMS-1)); ++idx) {
-// 			// from diagonal part of Hessian; d(doutput_d[grad_dim])_d[grad_dim]
-// 			// NOTE: LinearInterpolations' diagonal part is 0.
-// 			if (interpolation_type == InterpolationType::Smoothstep) {
-// 				float weight_2nd_diag = grad_in_diag[grad_dim];
-// 				uint32_t pos_grid_local[N_POS_DIMS];
+	static constexpr bool dimension_greater_than_1 = (N_POS_DIMS > 1);
+	#pragma unroll
+	for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
+		float grad_out = 0;
+		#pragma unroll
+		for (uint32_t idx = 0; idx < (1 << (N_POS_DIMS-1)); ++idx) {
+			// from diagonal part of Hessian; d(doutput_d[grad_dim])_d[grad_dim]
+			// NOTE: LinearInterpolations' diagonal part is 0.
+			if (interpolation_type == InterpolationType::Smoothstep) {
+				float weight_2nd_diag = grad_in_diag[grad_dim];
+				uint32_t pos_grid_local[N_POS_DIMS];
 
-// 				#pragma unroll
-// 				for (uint32_t non_grad_dim = 0; non_grad_dim < N_POS_DIMS-1; ++non_grad_dim) {
-// 					const uint32_t dim = non_grad_dim >= grad_dim ? (non_grad_dim+1) : non_grad_dim;
-// 					// real non_grad_dim
-// 					if ((idx & 1<<non_grad_dim) == 0) {
-// 						weight_2nd_diag *= 1 - pos[dim];
-// 						pos_grid_local[dim] = pos_grid[dim];
-// 					} else {
-// 						weight_2nd_diag *= pos[dim];
-// 						pos_grid_local[dim] = pos_grid[dim] + 1;
-// 					}
-// 				}
+				#pragma unroll
+				for (uint32_t non_grad_dim = 0; non_grad_dim < N_POS_DIMS-1; ++non_grad_dim) {
+					const uint32_t dim = non_grad_dim >= grad_dim ? (non_grad_dim+1) : non_grad_dim;
+					// real non_grad_dim
+					if ((idx & 1<<non_grad_dim) == 0) {
+						weight_2nd_diag *= 1 - pos[dim];
+						pos_grid_local[dim] = pos_grid[dim];
+					} else {
+						weight_2nd_diag *= pos[dim];
+						pos_grid_local[dim] = pos_grid[dim] + 1;
+					}
+				}
 
-// 				// left
-// 				pos_grid_local[grad_dim] = pos_grid[grad_dim];
-// 				grad_out += calc_dLdx(pos_grid_local, -weight_2nd_diag);
-// 				// right
-// 				pos_grid_local[grad_dim] = pos_grid[grad_dim] + 1;
-// 				grad_out += calc_dLdx(pos_grid_local, weight_2nd_diag);
-// 			}
+				// left
+				pos_grid_local[grad_dim] = pos_grid[grad_dim];
+				grad_out += calc_dLdx(pos_grid_local, -weight_2nd_diag);
+				// right
+				pos_grid_local[grad_dim] = pos_grid[grad_dim] + 1;
+				grad_out += calc_dLdx(pos_grid_local, weight_2nd_diag);
+			}
 
-// 			// from other part of Hessian; d(doutput_d[real_other_grad_dim])_d[grad_dim]
-// 			if (dimension_greater_than_1) {
-// 				#pragma unroll
-// 				for (uint32_t other_grad_dim = 0; other_grad_dim < N_POS_DIMS-1; ++other_grad_dim) {
-// 					const uint32_t real_other_grad_dim = other_grad_dim >= grad_dim ? (other_grad_dim+1) : other_grad_dim;
-// 					float weight_2nd_other = grad_in_other[real_other_grad_dim] * pos_derivative[grad_dim];
-// 					uint32_t pos_grid_local[N_POS_DIMS];
+			// from other part of Hessian; d(doutput_d[real_other_grad_dim])_d[grad_dim]
+			if (dimension_greater_than_1) {
+				#pragma unroll
+				for (uint32_t other_grad_dim = 0; other_grad_dim < N_POS_DIMS-1; ++other_grad_dim) {
+					const uint32_t real_other_grad_dim = other_grad_dim >= grad_dim ? (other_grad_dim+1) : other_grad_dim;
+					float weight_2nd_other = grad_in_other[real_other_grad_dim] * pos_derivative[grad_dim];
+					uint32_t pos_grid_local[N_POS_DIMS];
 
-// 					#pragma unroll
-// 					for (uint32_t non_grad_dim = 0; non_grad_dim < N_POS_DIMS-1; ++non_grad_dim) {
-// 						// real non_grad_dim
-// 						const uint32_t dim = non_grad_dim >= real_other_grad_dim ? (non_grad_dim+1) : non_grad_dim;
-// 						if ((idx & 1<<non_grad_dim) == 0) {
-// 							if (dim != grad_dim) {
-// 								weight_2nd_other *= 1 - pos[dim];
-// 							} else {
-// 								weight_2nd_other *= -1;
-// 							}
-// 							pos_grid_local[dim] = pos_grid[dim];
-// 						} else {
-// 							if (dim != grad_dim) {
-// 								weight_2nd_other *= pos[dim];
-// 							}
-// 							pos_grid_local[dim] = pos_grid[dim] + 1;
-// 						}
-// 					}
+					#pragma unroll
+					for (uint32_t non_grad_dim = 0; non_grad_dim < N_POS_DIMS-1; ++non_grad_dim) {
+						// real non_grad_dim
+						const uint32_t dim = non_grad_dim >= real_other_grad_dim ? (non_grad_dim+1) : non_grad_dim;
+						if ((idx & 1<<non_grad_dim) == 0) {
+							if (dim != grad_dim) {
+								weight_2nd_other *= 1 - pos[dim];
+							} else {
+								weight_2nd_other *= -1;
+							}
+							pos_grid_local[dim] = pos_grid[dim];
+						} else {
+							if (dim != grad_dim) {
+								weight_2nd_other *= pos[dim];
+							}
+							pos_grid_local[dim] = pos_grid[dim] + 1;
+						}
+					}
 
-// 					// left
-// 					pos_grid_local[real_other_grad_dim] = pos_grid[real_other_grad_dim];
-// 					grad_out += calc_dLdx(pos_grid_local, -weight_2nd_other);
-// 					// right
-// 					pos_grid_local[real_other_grad_dim] = pos_grid[real_other_grad_dim] + 1;
-// 					grad_out += calc_dLdx(pos_grid_local, weight_2nd_other);
-// 				}
-// 			}
-// 		}
+					// left
+					pos_grid_local[real_other_grad_dim] = pos_grid[real_other_grad_dim];
+					grad_out += calc_dLdx(pos_grid_local, -weight_2nd_other);
+					// right
+					pos_grid_local[real_other_grad_dim] = pos_grid[real_other_grad_dim] + 1;
+					grad_out += calc_dLdx(pos_grid_local, weight_2nd_other);
+				}
+			}
+		}
 
-// 		atomicAdd((float*)&dL_dx(grad_dim, i), grad_out);
-// 	}
-// }
+		atomicAdd((float*)&dL_dx(grad_dim, i), grad_out);
+	}
+}
 
-// // from dL_d(dL_dx) to dL_doutput
-// template <typename T, uint32_t N_POS_DIMS>
-// __global__ void kernel_grid_backward_input_backward_dLdoutput(
-// 	const uint32_t num_elements,
-// 	const uint32_t num_grid_features,
-// 	// inputs
-// 	MatrixView<const float> dL_ddLdx,
-// 	const float* __restrict__ dy_dx,
-// 	const T* dL_dy_rm,
-// 	// ouputs
-// 	tcnn::MatrixView<T> dL_ddLdy
-// ) {
-// 	const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
-// 	if (i >= num_elements) return;
+template <typename T, uint32_t N_POS_DIMS>
+__global__ void kernel_grid_backward_input_backward_dLdoutput(
+	const uint32_t num_elements,
+	const uint32_t num_grid_features,
+	// inputs
+	MatrixView<const float> dL_ddLdx,
+	const float* __restrict__ dy_dx,
+	const T* dL_dy_rm,
+	// ouputs
+	tcnn::MatrixView<T> dL_ddLdy
+) {
+	const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= num_elements) return;
 
-// 	for (uint32_t k=0; k < num_grid_features; ++k) {
-// 		auto dy_dx_local = ((tcnn::vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + k * num_elements];
+	for (uint32_t k=0; k < num_grid_features; ++k) {
+		auto dy_dx_local = ((tcnn::vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + k * num_elements];
 
-// 		float result = 0;
-// 		#pragma unroll
-// 		for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
-// 			result += dy_dx_local[grad_dim] * dL_ddLdx(grad_dim, i);
-// 		}
+		float result = 0;
+		#pragma unroll
+		for (uint32_t grad_dim = 0; grad_dim < N_POS_DIMS; ++grad_dim) {
+			result += dy_dx_local[grad_dim] * dL_ddLdx(grad_dim, i);
+		}
 
-// 		dL_ddLdy(k, i) = (T)result;
-// 	}
-// }
+		dL_ddLdy(k, i) = (T)result;
+	}
+}
 
 template <typename T>
 class GridEncoding : public Encoding<T> {
@@ -976,8 +914,6 @@ public:
 			} else if (grid_type == GridType::Hash) {
 				// If hash table needs fewer params than dense, then use fewer and rely on the hash.
 				params_in_level = std::min(params_in_level, (1u << log2_hashmap_size));
-			} else if (grid_type == GridType::Window) {
-				// No-op
 			} else {
 				throw std::runtime_error{fmt::format("GridEncoding: invalid grid type {}", to_string(grid_type))};
 			}
@@ -985,36 +921,15 @@ public:
 			m_offset_table.data[i] = offset;
 			offset += params_in_level;
 
-// #ifdef TCNN_VERBOSE_MEMORY_ALLOCS
-			if (grid_type == GridType::Window) {
-				std::cout << "WindowGridEncoding at level " << i << ": resolution=" << resolution << " params_in_level=" << params_in_level << std::endl;
-			} else {
-				std::cout << "GridEncoding at level " << i << ": resolution=" << resolution << " params_in_level=" << params_in_level << std::endl;
-			}
-// #endif
+#ifdef TCNN_VERBOSE_MEMORY_ALLOCS
+			std::cout << "GridEncoding at level " << i << ": resolution=" << resolution << " params_in_level=" << params_in_level << std::endl;
+#endif
 		}
 
-		// One more level??? why?
-		if (grid_type == GridType::Window) {
-			uint32_t max_params = std::numeric_limits<uint32_t>::max()/2;
-			const float scale = exp2f((m_n_levels) * std::log2(per_level_scale)) * base_resolution - 1.0f;
-			const uint32_t resolution = (uint32_t)(ceilf(scale)) + 1;
+		m_offset_table.data[m_n_levels] = offset;
+		m_offset_table.size = m_n_levels+1;
 
-			uint32_t params_in_level = std::pow((float)resolution, N_POS_DIMS) > (float)max_params ? max_params : powi(resolution, N_POS_DIMS);
-			params_in_level = std::min(params_in_level, (1u << log2_hashmap_size));
-
-			m_offset_table.data[0] = 0;
-			m_offset_table.data[1] = params_in_level;
-			m_offset_table.size = 2;
-
-			m_n_params = m_offset_table.data[1] * N_FEATURES_PER_LEVEL;
-		} else {
-			m_offset_table.data[m_n_levels] = offset;
-			m_offset_table.size = m_n_levels+1;
-
-			// default N_FEATURES_PER_LEVEL = 2 
-			m_n_params = m_offset_table.data[m_n_levels] * N_FEATURES_PER_LEVEL;
-		}
+		m_n_params = m_offset_table.data[m_n_levels] * N_FEATURES_PER_LEVEL;
 
 		m_n_padded_output_dims = m_n_output_dims = m_n_features;
 
@@ -1056,8 +971,6 @@ public:
 		// This way, only one level of the hashmap needs to fit into caches at a time (and it reused for consecutive
 		// elements) until it is time to process the next level.
 
-		// bocks_hashgrid = {ceil(elements/512), 16, 1} : the number of blocks
-		// N_THREADS_HASHGRID = 512 : the number of threads per block
 		static constexpr uint32_t N_THREADS_HASHGRID = 512;
 		const dim3 blocks_hashgrid = { div_round_up(num_elements, N_THREADS_HASHGRID), m_n_levels, 1 };
 
@@ -1072,26 +985,11 @@ public:
 			forward->dy_dx = GPUMatrix<float, RM>{N_POS_DIMS * m_n_features, input.n(), stream};
 		}
 
-		// std::cout << "[fwd \n"
-		// 	<< "blocks_hashgrid: " << blocks_hashgrid.x << ", " << blocks_hashgrid.y << ", " << blocks_hashgrid.z << "\n"
-		// 	<< "num_elements: " << num_elements << "\n"
-		// 	<< "m_n_features: " << m_n_features << "\n"
-		// 	<< "m_base_resolution: " << m_base_resolution << "\n"
-		// 	<< "m_per_level_scale: " << m_per_level_scale << "\n"
-		// 	<< "quantize_threshold: " << this->m_quantize_threshold << "\n"
-		// 	<< "max level: " << this->m_max_level << "\n"
-		// 	<< "max level gpu: " << this->m_max_level_gpu << std::endl;
-
-		const float scale = exp2f((m_n_levels - 1) * std::log2(m_per_level_scale)) * m_base_resolution - 1.0f;
-		const uint32_t max_resolution = (uint32_t)(ceilf(scale)) + 1;
-
-		// synced_streams : associated stream
 		kernel_grid<T, N_POS_DIMS, N_FEATURES_PER_LEVEL><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, synced_streams.get(0)>>>(
 			num_elements,
 			m_n_features,
 			m_offset_table,
 			m_base_resolution,
-			max_resolution,
 			std::log2(m_per_level_scale),
 			this->m_quantize_threshold,
 			this->m_max_level,
@@ -1175,24 +1073,11 @@ public:
 
 			const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
 
-			// std::cout << "[bwd \n" 
-			// 	<< "blocks_hashgrid: " << blocks_hashgrid.x << ", " << blocks_hashgrid.y << ", " << blocks_hashgrid.z << "\n"
-			// 	<< "num_elements: " << num_elements << "\n"
-			// 	<< "m_n_features: " << m_n_features << "\n"
-			// 	<< "m_base_resolution: " << m_base_resolution << "\n"
-			// 	<< "m_per_level_scale: " << m_per_level_scale << "\n"
-			// 	<< "max level: " << this->m_max_level << "\n"
-			// 	<< "max level gpu: " << this->m_max_level_gpu << std::endl;
-
-			const float scale = exp2f((m_n_levels - 1) * std::log2(m_per_level_scale)) * m_base_resolution - 1.0f;
-			const uint32_t max_resolution = (uint32_t)(ceilf(scale)) + 1;
-
 			kernel_grid_backward<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
 				num_elements,
 				m_n_features,
 				m_offset_table,
 				m_base_resolution,
-				max_resolution,
 				std::log2(m_per_level_scale),
 				this->m_max_level,
 				this->m_max_level_gpu,
@@ -1224,134 +1109,132 @@ public:
 		);
 	}
 
-	// from: dL_ddLdinput
-	// to:   dL_ddLdoutput, dL_dparams
-	// void backward_backward_input_impl(
-	// 	cudaStream_t stream,
-	// 	const Context& ctx,
-	// 	const GPUMatrixDynamic<float>& input,
-	// 	const GPUMatrixDynamic<float>& dL_ddLdinput,
-	// 	const GPUMatrixDynamic<T>& dL_doutput,
-	// 	GPUMatrixDynamic<T>* dL_ddLdoutput = nullptr,
-	// 	GPUMatrixDynamic<float>* dL_dinput = nullptr,
-	// 	bool use_inference_params = false,
-	// 	EGradientMode param_gradients_mode = EGradientMode::Overwrite
-	// ) override {
-	// 	const uint32_t num_elements = input.n();
-	// 	if ((!dL_ddLdoutput && param_gradients_mode == EGradientMode::Ignore) || m_n_padded_output_dims == 0 || num_elements == 0) {
-	// 		return;
-	// 	}
+	void backward_backward_input_impl(
+		cudaStream_t stream,
+		const Context& ctx,
+		const GPUMatrixDynamic<float>& input,
+		const GPUMatrixDynamic<float>& dL_ddLdinput,
+		const GPUMatrixDynamic<T>& dL_doutput,
+		GPUMatrixDynamic<T>* dL_ddLdoutput = nullptr,
+		GPUMatrixDynamic<float>* dL_dinput = nullptr,
+		bool use_inference_params = false,
+		EGradientMode param_gradients_mode = EGradientMode::Overwrite
+	) override {
+		const uint32_t num_elements = input.n();
+		if ((!dL_ddLdoutput && param_gradients_mode == EGradientMode::Ignore) || m_n_padded_output_dims == 0 || num_elements == 0) {
+			return;
+		}
 
-	// 	const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
+		const auto& forward = dynamic_cast<const ForwardContext&>(ctx);
 
-	// 	const T* dL_dy_rm = dL_doutput.data();
+		const T* dL_dy_rm = dL_doutput.data();
 
-	// 	GPUMemoryArena::Allocation workspace;
-	// 	if (dL_doutput.layout() == CM) {
-	// 		workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
+		GPUMemoryArena::Allocation workspace;
+		if (dL_doutput.layout() == CM) {
+			workspace = allocate_workspace(stream, num_elements * m_n_features * sizeof(T));
 
-	// 		// Transpose dL_dy. Use the buffer previously occupied by the encoded positions
-	// 		const dim3 threads_transpose = { m_n_levels * N_FEATURES_PER_LEVEL, 8, 1 };
-	// 		const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
-	// 		transpose_gradients<T><<<blocks_transpose, threads_transpose, 0, stream>>>(
-	// 			num_elements,
-	// 			(T*)workspace.data(),
-	// 			dL_doutput.pitched_ptr()
-	// 		);
+			// Transpose dL_dy. Use the buffer previously occupied by the encoded positions
+			const dim3 threads_transpose = { m_n_levels * N_FEATURES_PER_LEVEL, 8, 1 };
+			const uint32_t blocks_transpose = div_round_up(num_elements, threads_transpose.y);
+			transpose_gradients<T><<<blocks_transpose, threads_transpose, 0, stream>>>(
+				num_elements,
+				(T*)workspace.data(),
+				dL_doutput.pitched_ptr()
+			);
 
-	// 		dL_dy_rm = (const T*)workspace.data();
-	// 	}
+			dL_dy_rm = (const T*)workspace.data();
+		}
 
-	// 	if (param_gradients_mode != EGradientMode::Ignore) {
-	// 		// We accumulate gradients with grad_t precision, which, for performance reasons, is not always T.
-	// 		// If not, accumulate in a temporary buffer and cast later.
-	// 		grad_t* grid_gradient;
-	// 		GPUMemoryArena::Allocation grid_gradient_tmp;
+		if (param_gradients_mode != EGradientMode::Ignore) {
+			// We accumulate gradients with grad_t precision, which, for performance reasons, is not always T.
+			// If not, accumulate in a temporary buffer and cast later.
+			grad_t* grid_gradient;
+			GPUMemoryArena::Allocation grid_gradient_tmp;
 
-	// 		if (!std::is_same<grad_t, T>::value) {
-	// 			grid_gradient_tmp = allocate_workspace(stream, m_n_params * sizeof(grad_t));
-	// 			grid_gradient = (grad_t*)grid_gradient_tmp.data();
-	// 		} else {
-	// 			grid_gradient = (grad_t*)m_grid_gradient;
-	// 		}
+			if (!std::is_same<grad_t, T>::value) {
+				grid_gradient_tmp = allocate_workspace(stream, m_n_params * sizeof(grad_t));
+				grid_gradient = (grad_t*)grid_gradient_tmp.data();
+			} else {
+				grid_gradient = (grad_t*)m_grid_gradient;
+			}
 
-	// 		if (param_gradients_mode == EGradientMode::Overwrite) {
-	// 			CUDA_CHECK_THROW(cudaMemsetAsync(grid_gradient, 0, n_params() * sizeof(grad_t), stream));
-	// 		}
+			if (param_gradients_mode == EGradientMode::Overwrite) {
+				CUDA_CHECK_THROW(cudaMemsetAsync(grid_gradient, 0, n_params() * sizeof(grad_t), stream));
+			}
 
-	// 		static constexpr uint32_t N_THREADS_HASHGRID = 256;
-	// 		static constexpr uint32_t N_FEATURES_PER_THREAD = std::min(2u, N_FEATURES_PER_LEVEL);
+			static constexpr uint32_t N_THREADS_HASHGRID = 256;
+			static constexpr uint32_t N_FEATURES_PER_THREAD = std::min(2u, N_FEATURES_PER_LEVEL);
 
-	// 		const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
+			const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
 
-	// 		// from dL_d(dL_dx) to dL_dgrid
-	// 		kernel_grid_backward_input_backward_grid<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
-	// 			num_elements,
-	// 			m_n_features,
-	// 			m_offset_table,
-	// 			m_base_resolution,
-	// 			std::log2(m_per_level_scale),
-	// 			this->m_max_level,
-	// 			this->m_max_level_gpu,
-	// 			m_interpolation_type,
-	// 			m_grid_type,
-	// 			// inputs
-	// 			dL_ddLdinput.view(),
-	// 			forward.positions.data() ? forward.positions.view() : input.view(), // positions SoA
-	// 			dL_dy_rm, // gradients SoA
-	// 			// outputs
-	// 			grid_gradient
-	// 		);
+			// from dL_d(dL_dx) to dL_dgrid
+			kernel_grid_backward_input_backward_grid<T, grad_t, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
+				num_elements,
+				m_n_features,
+				m_offset_table,
+				m_base_resolution,
+				std::log2(m_per_level_scale),
+				this->m_max_level,
+				this->m_max_level_gpu,
+				m_interpolation_type,
+				m_grid_type,
+				// inputs
+				dL_ddLdinput.view(),
+				forward.positions.data() ? forward.positions.view() : input.view(), // positions SoA
+				dL_dy_rm, // gradients SoA
+				// outputs
+				grid_gradient
+			);
 
-	// 		if (!std::is_same<grad_t, T>::value) {
-	// 			parallel_for_gpu(stream, n_params(), [grad=m_grid_gradient, grad_tmp=grid_gradient] __device__ (size_t i) {
-	// 				grad[i] = (T)grad_tmp[i];
-	// 			});
-	// 		}
-	// 	}
+			if (!std::is_same<grad_t, T>::value) {
+				parallel_for_gpu(stream, n_params(), [grad=m_grid_gradient, grad_tmp=grid_gradient] __device__ (size_t i) {
+					grad[i] = (T)grad_tmp[i];
+				});
+			}
+		}
 
-	// 	if (dL_ddLdoutput) {
-	// 		// from dL_d(dL_dx) to dL_doutput
-	// 		linear_kernel(kernel_grid_backward_input_backward_dLdoutput<T, N_POS_DIMS>, 0, stream,
-	// 			num_elements,
-	// 			m_n_features,
-	// 			// inputs
-	// 			dL_ddLdinput.view(),
-	// 			forward.dy_dx.data(),
-	// 			dL_dy_rm,
-	// 			// outputs
-	// 			dL_ddLdoutput->view()
-	// 		);
-	// 	}
+		if (dL_ddLdoutput) {
+			// from dL_d(dL_dx) to dL_doutput
+			linear_kernel(kernel_grid_backward_input_backward_dLdoutput<T, N_POS_DIMS>, 0, stream,
+				num_elements,
+				m_n_features,
+				// inputs
+				dL_ddLdinput.view(),
+				forward.dy_dx.data(),
+				dL_dy_rm,
+				// outputs
+				dL_ddLdoutput->view()
+			);
+		}
 
-	// 	if (dL_dinput) {
-	// 		static constexpr uint32_t N_THREADS_HASHGRID = 256;
-	// 		static constexpr uint32_t N_FEATURES_PER_THREAD = std::min(2u, N_FEATURES_PER_LEVEL);
+		if (dL_dinput) {
+			static constexpr uint32_t N_THREADS_HASHGRID = 256;
+			static constexpr uint32_t N_FEATURES_PER_THREAD = std::min(2u, N_FEATURES_PER_LEVEL);
 
-	// 		const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
+			const dim3 blocks_hashgrid = { div_round_up(num_elements * N_FEATURES_PER_LEVEL / N_FEATURES_PER_THREAD, N_THREADS_HASHGRID), m_n_levels, 1 };
 
-	// 		// from dL_d(dL_dx) to dL_dx
-	// 		kernel_grid_backward_input_backward_input<T, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
-	// 			num_elements,
-	// 			m_n_features,
-	// 			m_offset_table,
-	// 			m_base_resolution,
-	// 			std::log2(m_per_level_scale),
-	// 			this->m_quantize_threshold,
-	// 			this->m_max_level,
-	// 			this->m_max_level_gpu,
-	// 			m_interpolation_type,
-	// 			m_grid_type,
-	// 			// inputs
-	// 			dL_ddLdinput.view(),
-	// 			forward.positions.data() ? forward.positions.view() : input.view(),
-	// 			dL_dy_rm,
-	// 			use_inference_params ? m_grid_inference : m_grid,
-	// 			// outputs
-	// 			dL_dinput->view()
-	// 		);
-	// 	}
-	// }
+			// from dL_d(dL_dx) to dL_dx
+			kernel_grid_backward_input_backward_input<T, N_POS_DIMS, N_FEATURES_PER_LEVEL, N_FEATURES_PER_THREAD><<<blocks_hashgrid, N_THREADS_HASHGRID, 0, stream>>>(
+				num_elements,
+				m_n_features,
+				m_offset_table,
+				m_base_resolution,
+				std::log2(m_per_level_scale),
+				this->m_quantize_threshold,
+				this->m_max_level,
+				this->m_max_level_gpu,
+				m_interpolation_type,
+				m_grid_type,
+				// inputs
+				dL_ddLdinput.view(),
+				forward.positions.data() ? forward.positions.view() : input.view(),
+				dL_dy_rm,
+				use_inference_params ? m_grid_inference : m_grid,
+				// outputs
+				dL_dinput->view()
+			);
+		}
+	}
 
 	uint32_t input_width() const override {
 		return N_POS_DIMS;
@@ -1437,7 +1320,7 @@ public:
 			{"interpolation", to_string(m_interpolation_type)},
 		};
 
-		if (m_grid_type == GridType::Hash || m_grid_type == GridType::Window) {
+		if (m_grid_type == GridType::Hash) {
 			result["log2_hashmap_size"] = m_log2_hashmap_size;
 		}
 
@@ -1480,7 +1363,7 @@ template <typename T, uint32_t N_FEATURES_PER_LEVEL>
 GridEncoding<T>* create_grid_encoding_templated(uint32_t n_dims_to_encode, const json& encoding) {
 	const uint32_t log2_hashmap_size = encoding.value("log2_hashmap_size", 19u);
 	const std::string encoding_type = encoding.value("otype", "Grid");
-	const std::string default_type = equals_case_insensitive(encoding_type, "TiledGrid") ? "Tiled" : (equals_case_insensitive(encoding_type, "DenseGrid") ? "Dense" : (equals_case_insensitive(encoding_type, "WindowGrid") ? "Window" : "Hash"));
+	const std::string default_type = equals_case_insensitive(encoding_type, "TiledGrid") ? "Tiled" : (equals_case_insensitive(encoding_type, "DenseGrid") ? "Dense" : "Hash");
 
 	uint32_t n_features;
 	if (encoding.contains("n_features") || encoding.contains("n_grid_features")) {

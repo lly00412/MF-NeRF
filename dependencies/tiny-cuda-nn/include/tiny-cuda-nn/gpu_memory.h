@@ -144,7 +144,6 @@ public:
 		total_n_bytes_allocated() -= get_bytes();
 
 		m_data = nullptr;
-		m_size = 0;
 	}
 
 	/// Frees memory again
@@ -429,8 +428,6 @@ struct Interval {
 class GPUMemoryArena {
 public:
 	GPUMemoryArena() {
-		m_device = cuda_device();
-
 		// Align memory at least by a cache line (128 bytes).
 		m_alignment = (size_t)128;
 		m_max_size = next_multiple(cuda_memory_info().total, cuda_memory_granularity());
@@ -445,7 +442,7 @@ public:
 			if (!printed_warning) {
 				printed_warning = true;
 				std::cout
-					<< "GPUMemoryArena: Warning: GPU " << m_device << " does not support virtual memory. "
+					<< "GPUMemoryArena: Warning: GPU " << cuda_device() << " does not support virtual memory. "
 					<< "Falling back to regular allocations, which will be larger and can cause occasional stutter."
 					<< std::endl;
 			}
@@ -462,20 +459,9 @@ public:
 
 	GPUMemoryArena(GPUMemoryArena&& other) = default;
 	GPUMemoryArena(const GPUMemoryArena& other) = delete;
-	GPUMemoryArena& operator=(GPUMemoryArena&& other) = delete;
-	GPUMemoryArena& operator=(const GPUMemoryArena& other) = delete;
 
 	~GPUMemoryArena() {
-		if (in_use()) {
-			std::cerr << "Attempting to free memory arena while it is still in use." << std::endl;
-		}
-
 		try {
-			// Make sure we're clearing the GPU memory arena on the correct device.
-			int previous_device = cuda_device();
-			set_cuda_device(m_device);
-			ScopeGuard revert_device = {[&]() { set_cuda_device(previous_device); }};
-
 			CUDA_CHECK_THROW(cudaDeviceSynchronize());
 
 			if (m_base_address) {
@@ -492,7 +478,7 @@ public:
 		} catch (std::runtime_error error) {
 			// Don't need to report on memory-free problems when the driver is shutting down.
 			if (std::string{error.what()}.find("driver shutting down") == std::string::npos) {
-				std::cerr << "Could not free memory arena: " << error.what() << std::endl;
+				std::cerr << "Could not free memory: " << error.what() << std::endl;
 			}
 		}
 	}
@@ -556,10 +542,6 @@ public:
 			return;
 		}
 
-		if (cuda_device() != m_device) {
-			throw std::runtime_error{fmt::format("Attempted to use a GPUMemoryArena of device {} from the wrong device {}.", m_device, cuda_device())};
-		}
-
 		if (m_fallback_memory) {
 			static const double GROWTH_FACTOR = 1.5;
 
@@ -579,7 +561,7 @@ public:
 		CUmemAllocationProp prop = {};
 		prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
 		prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-		prop.location.id = m_device;
+		prop.location.id = cuda_device();
 
 		m_handles.emplace_back();
 		CU_CHECK_THROW(cuMemCreate(&m_handles.back(), n_bytes_to_allocate, &prop, 0));
@@ -607,14 +589,10 @@ public:
 		return m_free_intervals.back().start;
 	}
 
-	bool in_use() const {
-		return m_free_intervals.size() != 1 || m_free_intervals.front().size() != m_max_size;
-	}
-
 	class Allocation {
 	public:
 		Allocation() = default;
-		Allocation(cudaStream_t stream, size_t offset, const std::shared_ptr<GPUMemoryArena>& workspace)
+		Allocation(cudaStream_t stream, size_t offset, GPUMemoryArena* workspace)
 		: m_stream{stream}, m_data{workspace->data() + offset}, m_offset{offset}, m_workspace{workspace}, m_backing_memory{workspace->backing_memory()}
 		{}
 
@@ -655,7 +633,7 @@ public:
 		cudaStream_t m_stream = nullptr;
 		uint8_t* m_data = nullptr;
 		size_t m_offset = 0;
-		std::shared_ptr<GPUMemoryArena> m_workspace = nullptr;
+		GPUMemoryArena* m_workspace = nullptr;
 
 		// Backing GPUMemory (if backed by a GPUMemory). Ensures that
 		// the backing memory is only freed once all allocations that
@@ -683,7 +661,6 @@ private:
 	std::vector<Interval> m_free_intervals;
 	std::unordered_map<size_t, size_t> m_allocated_intervals;
 
-	int m_device = 0;
 	CUdeviceptr m_base_address = {};
 	size_t m_size = 0;
 
@@ -697,9 +674,15 @@ private:
 	size_t m_max_size;
 };
 
-// Defined in common.cu to facilitate ordered destruction upon program exit.
-std::unordered_map<cudaStream_t, std::shared_ptr<GPUMemoryArena>>& stream_gpu_memory_arenas();
-std::unordered_map<int, std::shared_ptr<GPUMemoryArena>>& global_gpu_memory_arenas();
+inline std::unordered_map<cudaStream_t, GPUMemoryArena>& stream_gpu_memory_arenas() {
+	static std::unordered_map<cudaStream_t, GPUMemoryArena> s_gpu_memory_arenas;
+	return s_gpu_memory_arenas;
+}
+
+inline std::unordered_map<int, GPUMemoryArena>& global_gpu_memory_arenas() {
+	static std::unordered_map<int, GPUMemoryArena> s_gpu_memory_arenas;
+	return s_gpu_memory_arenas;
+}
 
 inline GPUMemoryArena::Allocation allocate_workspace(cudaStream_t stream, size_t n_bytes) {
 	if (n_bytes == 0) {
@@ -708,13 +691,10 @@ inline GPUMemoryArena::Allocation allocate_workspace(cudaStream_t stream, size_t
 	}
 
 	auto& arena = stream ? stream_gpu_memory_arenas()[stream] : global_gpu_memory_arenas()[cuda_device()];
-	if (!arena) {
-		arena = std::make_shared<GPUMemoryArena>();
-	}
-	return GPUMemoryArena::Allocation{stream, arena->allocate(n_bytes), arena};
+	return GPUMemoryArena::Allocation{stream, arena.allocate(n_bytes), &arena};
 }
 
-inline size_t align_to_cacheline(size_t bytes) {
+static size_t align_to_cacheline(size_t bytes) {
 	return next_multiple(bytes, (size_t)128);
 }
 

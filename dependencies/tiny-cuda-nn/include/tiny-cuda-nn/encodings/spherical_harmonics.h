@@ -56,7 +56,7 @@ __global__ void kernel_sh(
 
 	data_out.advance_cols(i);
 
-	TCNN_PRAGMA_UNROLL
+	#pragma unroll
 	for (uint32_t j = 0; j < num_to_pad; ++j) {
 		data_out(j) = (T)1.0f;
 	}
@@ -395,7 +395,7 @@ class SphericalHarmonicsEncoding : public Encoding<T> {
 public:
 	SphericalHarmonicsEncoding(uint32_t degree, uint32_t n_dims_to_encode)
 	: m_degree{degree}, m_n_dims_to_encode{n_dims_to_encode} {
-		m_n_output_dims = degree * degree;
+		m_n_padded_output_dims = m_n_output_dims = degree * degree;
 
 		if (n_dims_to_encode != 3) {
 			throw std::runtime_error{"Can only encode 3D directions in spherical harmonics."};
@@ -417,7 +417,7 @@ public:
 		bool use_inference_params = false,
 		bool prepare_input_gradients = false
 	) override {
-		if (!output || padded_output_width() == 0) {
+		if (!output || m_n_padded_output_dims == 0) {
 			return std::make_unique<Context>();
 		}
 
@@ -442,7 +442,7 @@ public:
 		bool use_inference_params = false,
 		EGradientMode param_gradients_mode = EGradientMode::Overwrite
 	) override {
-		if (!dL_dinput || padded_output_width() == 0) {
+		if (!dL_dinput || m_n_padded_output_dims == 0) {
 			return;
 		}
 
@@ -461,23 +461,24 @@ public:
 	}
 
 	uint32_t padded_output_width() const override {
-		return m_n_output_dims + m_n_to_pad;
+		return m_n_padded_output_dims;
 	}
 
 	uint32_t output_width() const override {
-		return padded_output_width();
+		return m_n_padded_output_dims;
 	}
 
 	uint32_t required_input_alignment() const override {
 		return 1;
 	}
 
-	void set_padded_output_width(uint32_t padded_output_width) override {
-		CHECK_THROW(padded_output_width >= m_n_output_dims);
-		m_n_to_pad = padded_output_width - m_n_output_dims;
+	void set_alignment(uint32_t alignment) override {
+		alignment = lcm(alignment, min_alignment());
+		m_n_padded_output_dims = next_multiple(m_n_output_dims, alignment);
+		m_n_to_pad = m_n_padded_output_dims - m_n_output_dims;
 	}
 
-	uint32_t required_output_alignment() const override {
+	uint32_t min_alignment() const override {
 		return 1;
 	}
 
@@ -499,6 +500,7 @@ private:
 
 	// derived sizes
 	uint32_t m_n_output_dims;
+	uint32_t m_n_padded_output_dims;
 	uint32_t m_n_to_pad = 0;
 };
 

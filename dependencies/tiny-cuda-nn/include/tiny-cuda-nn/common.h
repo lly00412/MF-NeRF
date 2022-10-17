@@ -35,7 +35,6 @@
 #define TCNN_NAMESPACE_BEGIN namespace tcnn {
 #define TCNN_NAMESPACE_END }
 
-
 #include <tiny-cuda-nn/cpp_api.h>
 
 #include <fmt/core.h>
@@ -61,7 +60,7 @@ static constexpr uint32_t MIN_GPU_ARCH = TCNN_MIN_GPU_ARCH;
 //
 //  GPU Arch | FullyFusedMLP supported | CUTLASS SmArch supported |                 Precision
 // ----------|-------------------------|--------------------------|--------------------------
-//     80-90 |                     yes |                       80 |                    __half
+//    80, 86 |                     yes |                       80 |                    __half
 //        75 |                     yes |                       75 |                    __half
 //        70 |                      no |                       70 |                    __half
 // 53-60, 62 |                      no |                       70 |  __half (no tensor cores)
@@ -121,9 +120,6 @@ std::string to_upper(std::string str);
 inline bool equals_case_insensitive(const std::string& str1, const std::string& str2) {
 	return to_lower(str1) == to_lower(str2);
 }
-
-template <typename T>
-std::string type_to_string();
 
 inline bool is_pot(uint32_t num, uint32_t* log2 = nullptr) {
 	if (log2) *log2 = 0;

@@ -81,7 +81,7 @@ public:
 		m_params_buffer.resize(sizeof(PARAMS_T) * n_params * 3 + sizeof(float) * n_params * 1);
 		m_params_buffer.memset(0);
 
-		reset_param_pointers();
+		set_param_pointers();
 
 		m_model->initialize_params(
 			m_rng,
@@ -146,8 +146,8 @@ public:
 		return forward;
 	}
 
-	std::unique_ptr<ForwardContext> forward(const float loss_scale, const GPUMatrixDynamic<T>& input, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr) {
-		return forward(nullptr, loss_scale, input, target, data_pdf);
+	void forward(const float loss_scale, const GPUMatrixDynamic<T>& input, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr) {
+		forward(nullptr, loss_scale, input, target, data_pdf);
 	}
 
 	void backward(cudaStream_t stream, const ForwardContext& ctx, const GPUMatrixDynamic<T>& input) {
@@ -170,8 +170,7 @@ public:
 		cudaStream_t stream,
 		const GPUMatrixDynamic<T>& input,
 		const GPUMatrix<float>& target,
-		const GPUMatrix<float>* data_pdf = nullptr,
-		bool run_optimizer = true
+		const GPUMatrix<float>* data_pdf = nullptr
 	) {
 		CHECK_THROW(input.n() == target.n());
 		CHECK_THROW(target.m() == m_model->output_width());
@@ -184,19 +183,16 @@ public:
 			backward(stream, *result, input);
 		});
 
-		if (run_optimizer) {
-			optimizer_step(stream, loss_scale);
-		}
+		optimizer_step(stream, loss_scale);
 		return result;
 	}
 
 	std::unique_ptr<ForwardContext> training_step(
 		const GPUMatrixDynamic<T>& input,
 		const GPUMatrix<float>& target,
-		const GPUMatrix<float>* data_pdf = nullptr,
-		bool run_optimizer = true
+		const GPUMatrix<float>* data_pdf = nullptr
 	) {
-		return training_step(nullptr, input, target, data_pdf, run_optimizer);
+		return training_step(nullptr, input, target, data_pdf);
 	}
 
 	float loss(cudaStream_t stream, const ForwardContext& ctx) const {
@@ -220,25 +216,13 @@ public:
 		};
 	}
 
-	float* params_full_precision() const {
+	float* params() {
 		return m_params_full_precision;
-	}
-
-	PARAMS_T* params() const {
-		return m_params;
-	}
-
-	PARAMS_T* params_inference() const {
-		return m_params_inference;
-	}
-
-	PARAMS_T* param_gradients() const {
-		return m_param_gradients;
 	}
 
 	void set_params_full_precision(const float* params, size_t n_params, bool device_ptr = false) {
 		if (n_params != m_model->n_params()) {
-			throw std::runtime_error{"Can't set fp params because buffer has the wrong size."};
+			throw std::runtime_error{"Can't set params because CPU buffer has the wrong size."};
 		}
 		CUDA_CHECK_THROW(cudaMemcpy(m_params_full_precision, params, sizeof(float)*n_params, device_ptr ? cudaMemcpyDeviceToDevice : cudaMemcpyHostToDevice));
 
@@ -252,7 +236,7 @@ public:
 
 	void set_params(const PARAMS_T* params, size_t n_params, bool device_ptr = false) {
 		if (n_params != m_model->n_params()) {
-			throw std::runtime_error{"Can't set params because buffer has the wrong size."};
+			throw std::runtime_error{"Can't set params because CPU buffer has the wrong size."};
 		}
 		CUDA_CHECK_THROW(cudaMemcpy(m_params_inference, params, sizeof(PARAMS_T)*n_params, device_ptr ? cudaMemcpyDeviceToDevice : cudaMemcpyHostToDevice));
 		CUDA_CHECK_THROW(cudaMemcpy(m_params, m_params_inference, sizeof(PARAMS_T)*n_params, cudaMemcpyDeviceToDevice));
@@ -273,7 +257,6 @@ public:
 
 		json data;
 		data["n_params"] = n_params;
-		data["params_type"] = type_to_string<PARAMS_T>();
 		data["params_binary"] = gpu_memory_to_json_binary(m_params_inference, sizeof(PARAMS_T)*n_params);
 
 		if (serialize_optimizer) {
@@ -284,38 +267,19 @@ public:
 	}
 
 	void deserialize(const json& data) {
-		std::string type = data.value("params_type", type_to_string<PARAMS_T>());
-		if (type == "float") {
-			GPUMemory<float> params = data["params_binary"];
-			set_params_full_precision(params.data(), params.size(), true);
-		} else if (type == "__half") {
-			GPUMemory<__half> params_hp = data["params_binary"];
-			size_t n_params = params_hp.size();
-
-			GPUMemory<PARAMS_T> params(n_params);
-			parallel_for_gpu(n_params, [params=params.data(), params_hp=params_hp.data()] __device__ (size_t i) {
-				params[i] = (PARAMS_T)params_hp[i];
-			});
-
-			set_params(params.data(), params.size(), true);
-		} else {
-			throw std::runtime_error{"Trainer: snapshot parameters must be of type float of __half"};
-		}
+		GPUMemory<PARAMS_T> params = data["params_binary"];
+		set_params(params.data(), params.size(), true);
 
 		if (data.contains("optimizer")) {
 			m_optimizer->deserialize(data["optimizer"]);
 		}
 
-		reset_param_pointers();
+		set_param_pointers();
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 	}
 
-	void set_param_gradients_pointer(PARAMS_T* gradients) {
-		reset_param_pointers();
-		m_model->set_params(m_params, m_params_inference, m_params_backward, gradients);
-	}
-
-	void reset_param_pointers() {
+private:
+	void set_param_pointers() {
 		size_t n_params = m_model->n_params();
 
 		m_params_full_precision = (float*)(m_params_buffer.data());
@@ -332,11 +296,6 @@ public:
 		m_model->set_params(m_params, m_params_inference, m_params_backward, m_param_gradients);
 	}
 
-	size_t n_params() const {
-		return m_model->n_params();
-	}
-
-private:
 	std::shared_ptr<DifferentiableObject<T, PARAMS_T, COMPUTE_T>> m_model;
 	std::shared_ptr<Optimizer<PARAMS_T>> m_optimizer;
 	std::shared_ptr<Loss<COMPUTE_T>> m_loss;

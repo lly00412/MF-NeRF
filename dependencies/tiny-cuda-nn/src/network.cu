@@ -119,8 +119,6 @@ template <typename T>
 Network<T>* create_network(const json& network) {
 	std::string network_type = select_network(network);
 
-	std::cout << network_type << ": " << network["n_input_dims"] << ", " << network["n_output_dims"] << ", " << network.value("n_hidden_layers", 5u) << std::endl;
-
 	if (equals_case_insensitive(network_type, "FullyFusedMLP")) {
 		if (!std::is_same<network_precision_t, __half>::value) {
 			throw std::runtime_error{"FullyFusedMLP can only be used if the network precision is set to __half."};

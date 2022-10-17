@@ -143,9 +143,15 @@ private:
 	cudaEvent_t m_event;
 };
 
-// Defined in common.cu to facilitate ordered destruction upon program exit.
-std::unordered_map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>>& stream_multi_streams();
-std::unordered_map<int, std::stack<std::shared_ptr<MultiStream>>>& global_multi_streams();
+inline std::unordered_map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>>& stream_multi_streams() {
+	static std::unordered_map<cudaStream_t, std::stack<std::shared_ptr<MultiStream>>> s_multi_streams;
+	return s_multi_streams;
+}
+
+inline std::unordered_map<int, std::stack<std::shared_ptr<MultiStream>>>& global_multi_streams() {
+	static std::unordered_map<int, std::stack<std::shared_ptr<MultiStream>>> s_multi_streams;
+	return s_multi_streams;
+}
 
 inline std::stack<std::shared_ptr<MultiStream>>& get_multi_stream_stack(cudaStream_t parent_stream) {
 	return parent_stream ? stream_multi_streams()[parent_stream] : global_multi_streams()[cuda_device()];
@@ -153,11 +159,6 @@ inline std::stack<std::shared_ptr<MultiStream>>& get_multi_stream_stack(cudaStre
 
 inline void free_multi_streams(cudaStream_t parent_stream) {
 	CHECK_THROW(parent_stream);
-
-	// Copy the multi stream shared_ptr's into a separate variable,
-	// such that their destruction happens after unordered_map::erase(...)
-	// is already finished. This alleviates potential non-reentrancy problems.
-	auto multi_streams = stream_multi_streams()[parent_stream];
 	stream_multi_streams().erase(parent_stream);
 }
 
