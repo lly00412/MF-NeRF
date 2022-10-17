@@ -402,7 +402,7 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 		throw std::invalid_argument{"No training images were found for NeRF training!"};
 	}
 
-	auto progress = tlog::progress(result.n_images);
+	// auto progress = tlog::progress(result.n_images);
 
 	result.from_mitsuba = false;
 	bool fix_premult = false;
@@ -688,7 +688,7 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 			result.xforms[i_img].start = result.nerf_matrix_to_ngp(result.xforms[i_img].start);
 			result.xforms[i_img].end = result.nerf_matrix_to_ngp(result.xforms[i_img].end);
 
-			progress.update(++n_loaded);
+			// progress.update(++n_loaded);
 		}, futures);
 
 		if (json.contains("frames")) {
@@ -699,7 +699,7 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 
 	waitAll(futures);
 
-	tlog::success() << "Loaded " << images.size() << " images after " << tlog::durationToString(progress.duration());
+	// tlog::success() << "Loaded " << images.size() << " images after " << tlog::durationToString(progress.duration());
 	tlog::info() << "  cam_aabb=" << cam_aabb;
 
 	if (result.has_rays) {

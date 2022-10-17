@@ -8,6 +8,9 @@
 
 cmake_minimum_required(VERSION 3.18)
 
+set(CMAKE_C_COMPILER /usr/bin/gcc)
+set(CMAKE_CXX_COMPILER /usr/bin/g++)
+
 project(instant-ngp
 	VERSION 1.0
 	DESCRIPTION "Instant neural graphics primitives"
@@ -19,11 +22,13 @@ if (NOT NGP_DEPLOY)
 	set(NGP_VERSION "${NGP_VERSION}dev")
 endif()
 
+option(TCNN_VERBOSE_MEMORY_ALLOCS ON)
 option(NGP_BUILD_WITH_GUI "Build with GUI support (requires GLFW and GLEW)?" ON)
 option(NGP_BUILD_WITH_VULKAN "Build with Vulkan to enable DLSS support?" ON)
 option(NGP_BUILD_WITH_OPTIX "Build with OptiX to enable hardware ray tracing?" ON)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+# set(CMAKE_CUDA_FLAGS_DEBUG "-g -G")
 
 ###############################################################################
 # Build type and C++ compiler setup
