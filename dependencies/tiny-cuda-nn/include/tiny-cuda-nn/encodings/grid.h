@@ -31,6 +31,8 @@
 
 #pragma once
 
+#include <cuda_profiler_api.h>
+
 #include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/encoding.h>

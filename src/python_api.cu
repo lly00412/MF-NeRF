@@ -558,6 +558,12 @@ PYBIND11_MODULE(pyngp, m) {
 		.def_readonly("m_nerf_train_camera_end", &Testbed::CustomTimer::m_nerf_train_camera_end)
 		.def_readonly("m_nerf_update_loss_graph_start", &Testbed::CustomTimer::m_nerf_update_loss_graph_start)
 		.def_readonly("m_nerf_update_loss_graph_end", &Testbed::CustomTimer::m_nerf_update_loss_graph_end)
+		.def_readonly("m_nerf_start_numsteps_counter", &Testbed::CustomTimer::m_nerf_start_numsteps_counter)
+		.def_readonly("m_nerf_start_numsteps_counter_compacted", &Testbed::CustomTimer::m_nerf_start_numsteps_counter_compacted)
+		.def_readonly("m_nerf_end_numsteps_counter_compacted", &Testbed::CustomTimer::m_nerf_end_numsteps_counter_compacted)
+		.def_readonly("m_nerf_start_reduce_sum", &Testbed::CustomTimer::m_nerf_start_reduce_sum)
+		.def_readonly("m_nerf_end_reduce_sum", &Testbed::CustomTimer::m_nerf_end_reduce_sum)
+		.def_readonly("m_nerf_end_rays_per_batch", &Testbed::CustomTimer::m_nerf_end_rays_per_batch)
 		;
 	
 	py::class_<Testbed::CustomMemoryTracker> custommemtracker(testbed, "CustomMemoryTracker");

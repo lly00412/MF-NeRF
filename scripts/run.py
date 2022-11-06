@@ -247,6 +247,16 @@ if __name__ == "__main__":
 						testbed.m_timer.m_nerf_envmap_end,
 						testbed.m_timer.m_nerf_envmap_end - testbed.m_timer.m_nerf_envmap_start,
 						testbed.m_timer.m_nerf_rgb_loss_scalar_start,
+						testbed.m_timer.m_nerf_start_numsteps_counter,
+						testbed.m_timer.m_nerf_start_numsteps_counter_compacted,
+						testbed.m_timer.m_nerf_start_numsteps_counter_compacted - testbed.m_timer.m_nerf_start_numsteps_counter,
+						testbed.m_timer.m_nerf_end_numsteps_counter_compacted,
+						testbed.m_timer.m_nerf_end_numsteps_counter_compacted - testbed.m_timer.m_nerf_start_numsteps_counter_compacted,
+						testbed.m_timer.m_nerf_start_reduce_sum,
+						testbed.m_timer.m_nerf_end_reduce_sum,
+						testbed.m_timer.m_nerf_end_reduce_sum - testbed.m_timer.m_nerf_start_reduce_sum,
+						testbed.m_timer.m_nerf_end_rays_per_batch,
+						testbed.m_timer.m_nerf_end_rays_per_batch - testbed.m_timer.m_nerf_end_reduce_sum,
 						testbed.m_timer.m_nerf_rgb_loss_scalar_end,
 						testbed.m_timer.m_nerf_rgb_loss_scalar_end - testbed.m_timer.m_nerf_rgb_loss_scalar_start,
 						testbed.m_timer.m_nerf_compute_cdf_start,
@@ -432,6 +442,16 @@ if __name__ == "__main__":
 						'T_m_nerf_envmap_end',					# 22
 						'Envmap',								# 22 - 21
 						'T_m_nerf_rgb_loss_scalar_start',		# 23
+						'T_m_nerf_start_numsteps_counter',		# 23
+						'T_m_nerf_start_numsteps_counter_compacted',		# 23
+						'numsteps_counter',
+						'T_m_nerf_end_numsteps_counter_compacted',
+						'numsteps_counter_compacted',
+						'T_m_nerf_start_reduce_sum',
+						'T_m_nerf_end_reduce_sum',
+						'reduce_sum',
+						'T_m_nerf_end_rays_per_batch',
+						'rays_per_batch',
 						'T_m_nerf_rgb_loss_scalar_end',			# 24
 						'Loss_scalar',							# 24 - 23
 						'T_m_nerf_compute_cdf_start',			# 25

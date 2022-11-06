@@ -2732,11 +2732,14 @@ void Testbed::Nerf::Training::Counters::prepare_for_training_steps(cudaStream_t 
 	CUDA_CHECK_THROW(cudaMemsetAsync(loss.data(), 0, sizeof(float)*rays_per_batch, stream));
 }
 
-float Testbed::Nerf::Training::Counters::update_after_training(uint32_t target_batch_size, bool get_loss_scalar, cudaStream_t stream) {
+float Testbed::Nerf::Training::Counters::update_after_training(uint32_t target_batch_size, bool get_loss_scalar, cudaStream_t stream, CustomTimer& m_timer) {
 	std::vector<uint32_t> counter_cpu(1);
 	std::vector<uint32_t> compacted_counter_cpu(1);
+	m_timer.m_nerf_start_numsteps_counter = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	numsteps_counter.copy_to_host(counter_cpu);
+	m_timer.m_nerf_start_numsteps_counter_compacted = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	numsteps_counter_compacted.copy_to_host(compacted_counter_cpu);
+	m_timer.m_nerf_end_numsteps_counter_compacted = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	measured_batch_size = 0;
 	measured_batch_size_before_compaction = 0;
 
@@ -2747,13 +2750,18 @@ float Testbed::Nerf::Training::Counters::update_after_training(uint32_t target_b
 	measured_batch_size_before_compaction = counter_cpu[0];
 	measured_batch_size = compacted_counter_cpu[0];
 
+	m_timer.m_nerf_start_reduce_sum = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	float loss_scalar = 0.0;
 	if (get_loss_scalar) {
+		// target_batch_size = m_training_batch_size = 2^18
 		loss_scalar = reduce_sum(loss.data(), rays_per_batch, stream) * (float)measured_batch_size / (float)target_batch_size;
 	}
+	m_timer.m_nerf_end_reduce_sum = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 
 	rays_per_batch = (uint32_t)((float)rays_per_batch * (float)target_batch_size / (float)measured_batch_size);
 	rays_per_batch = std::min(next_multiple(rays_per_batch, tcnn::batch_size_granularity), 1u << 18);
+
+	m_timer.m_nerf_end_rays_per_batch = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 
 	return loss_scalar;
 }
@@ -2835,7 +2843,7 @@ void Testbed::train_nerf(uint32_t target_batch_size, bool get_loss_scalar, cudaS
 	m_timer.m_nerf_envmap_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 
 	m_timer.m_nerf_rgb_loss_scalar_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
-	float loss_scalar = m_nerf.training.counters_rgb.update_after_training(target_batch_size, get_loss_scalar, stream);
+	float loss_scalar = m_nerf.training.counters_rgb.update_after_training(target_batch_size, get_loss_scalar, stream, m_timer);
 	bool zero_records = m_nerf.training.counters_rgb.measured_batch_size == 0;
 	if (get_loss_scalar) {
 		m_loss_scalar.update(loss_scalar);

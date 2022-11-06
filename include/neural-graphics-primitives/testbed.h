@@ -506,6 +506,64 @@ public:
 
 	bool m_gui_redraw = true;
 
+	typedef struct CustomTimer {
+		std::chrono::time_point<std::chrono::system_clock> m_timer_start = std::chrono::system_clock::now();
+		double m_nerf_reset_accumulation_start;
+		double m_nerf_reset_accumulation_end;
+		double m_nerf_train_prep_start;
+		double m_nerf_train_prep_end;
+		double m_nerf_update_hyperparam_start;
+		double m_nerf_update_hyperparam_end;
+		double m_nerf_i_dont_know1_start;
+		double m_nerf_i_dont_know1_end;
+		double m_nerf_train_start;
+		double m_nerf_train_sampling_start;
+		double m_nerf_train_sampling_end;
+		double m_nerf_train_inference_start;
+		double m_nerf_train_inference_end;
+		double m_nerf_train_loss_start;
+		double m_nerf_train_loss_end;
+		double m_nerf_train_forward;
+		double m_nerf_train_backward;
+		double m_nerf_train_backward_end;
+		double m_nerf_train_end;
+		double m_nerf_optimizer_start;
+		double m_nerf_optimizer_end;
+		double m_nerf_envmap_start;
+		double m_nerf_envmap_end;
+		double m_nerf_rgb_loss_scalar_start;
+		double m_nerf_memcopy_start;
+		double m_nerf_memcopy_end;
+		double m_nerf_rgb_loss_scalar_end;
+		double m_nerf_compute_cdf_start;
+		double m_nerf_compute_cdf_end;
+		double m_nerf_train_extra_dims_start;
+		double m_nerf_train_extra_dims_end;
+		double m_nerf_train_camera_start;
+		double m_nerf_train_camera_end;
+		double m_nerf_update_loss_graph_start;
+		double m_nerf_update_loss_graph_end;
+		double m_nerf_start_numsteps_counter;
+		double m_nerf_start_numsteps_counter_compacted;
+		double m_nerf_end_numsteps_counter_compacted;
+		double m_nerf_start_reduce_sum;
+		double m_nerf_end_reduce_sum;
+		double m_nerf_end_rays_per_batch;
+	} CustomTimer;
+	CustomTimer m_timer;
+
+	struct CustomMemoryTracker {
+		size_t m_base = tcnn::total_n_bytes_allocated() + dlss_allocated_bytes();
+		size_t m_nerf_train_prep_end;
+		size_t m_nerf_train_sampling_end;
+		size_t m_nerf_train_inference_end;
+		size_t m_nerf_train_loss_end;
+		size_t m_nerf_train_forward_end;
+		size_t m_nerf_train_backward_end;
+		size_t m_nerf_optimizer_end;
+	} m_mem_tracker;
+
+
 	struct Nerf {
 		NerfTracer tracer;
 
@@ -569,7 +627,7 @@ public:
 				uint32_t measured_batch_size_before_compaction = 0;
 
 				void prepare_for_training_steps(cudaStream_t stream);
-				float update_after_training(uint32_t target_batch_size, bool get_loss_scalar, cudaStream_t stream);
+				float update_after_training(uint32_t target_batch_size, bool get_loss_scalar, cudaStream_t stream, CustomTimer &m_timer);
 			};
 
 			Counters counters_rgb;
@@ -787,56 +845,6 @@ public:
 		m_seed = Eigen::internal::random<uint64_t>();
 		return m_seed;
 	}
-
-	struct CustomTimer {
-		std::chrono::time_point<std::chrono::system_clock> m_timer_start = std::chrono::system_clock::now();
-		double m_nerf_reset_accumulation_start;
-		double m_nerf_reset_accumulation_end;
-		double m_nerf_train_prep_start;
-		double m_nerf_train_prep_end;
-		double m_nerf_update_hyperparam_start;
-		double m_nerf_update_hyperparam_end;
-		double m_nerf_i_dont_know1_start;
-		double m_nerf_i_dont_know1_end;
-		double m_nerf_train_start;
-		double m_nerf_train_sampling_start;
-		double m_nerf_train_sampling_end;
-		double m_nerf_train_inference_start;
-		double m_nerf_train_inference_end;
-		double m_nerf_train_loss_start;
-		double m_nerf_train_loss_end;
-		double m_nerf_train_forward;
-		double m_nerf_train_backward;
-		double m_nerf_train_backward_end;
-		double m_nerf_train_end;
-		double m_nerf_optimizer_start;
-		double m_nerf_optimizer_end;
-		double m_nerf_envmap_start;
-		double m_nerf_envmap_end;
-		double m_nerf_rgb_loss_scalar_start;
-		double m_nerf_memcopy_start;
-		double m_nerf_memcopy_end;
-		double m_nerf_rgb_loss_scalar_end;
-		double m_nerf_compute_cdf_start;
-		double m_nerf_compute_cdf_end;
-		double m_nerf_train_extra_dims_start;
-		double m_nerf_train_extra_dims_end;
-		double m_nerf_train_camera_start;
-		double m_nerf_train_camera_end;
-		double m_nerf_update_loss_graph_start;
-		double m_nerf_update_loss_graph_end;
-	} m_timer;
-
-	struct CustomMemoryTracker {
-		size_t m_base = tcnn::total_n_bytes_allocated() + dlss_allocated_bytes();
-		size_t m_nerf_train_prep_end;
-		size_t m_nerf_train_sampling_end;
-		size_t m_nerf_train_inference_end;
-		size_t m_nerf_train_loss_end;
-		size_t m_nerf_train_forward_end;
-		size_t m_nerf_train_backward_end;
-		size_t m_nerf_optimizer_end;
-	} m_mem_tracker;
 
 	// Rendering/UI bookkeeping
 	Ema m_training_prep_ms = {EEmaType::Time, 100};
