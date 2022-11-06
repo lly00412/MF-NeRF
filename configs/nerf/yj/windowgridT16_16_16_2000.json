@@ -1,0 +1,9 @@
+{
+	"parent" : "base.json",
+	"encoding": {
+		"otype": "WindowGrid",
+		"log2_hashmap_size": 16,
+		"n_levels": 16,
+		"base_resolution": 16
+	}
+}
