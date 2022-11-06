@@ -2771,6 +2771,7 @@ void Testbed::train_nerf(uint32_t target_batch_size, bool get_loss_scalar, cudaS
 		return;
 	}
 
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_i_dont_know1_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	if (m_nerf.training.include_sharpness_in_error) {
 		size_t n_cells = NERF_GRIDSIZE() * NERF_GRIDSIZE() * NERF_GRIDSIZE() * NERF_CASCADES();
@@ -2816,6 +2817,7 @@ void Testbed::train_nerf(uint32_t target_batch_size, bool get_loss_scalar, cudaS
 	if (envmap_gradient) {
 		CUDA_CHECK_THROW(cudaMemsetAsync(envmap_gradient, 0, sizeof(float)*m_envmap.envmap->n_params(), stream));
 	}
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_i_dont_know1_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 
 	m_timer.m_nerf_train_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
@@ -2827,19 +2829,23 @@ void Testbed::train_nerf(uint32_t target_batch_size, bool get_loss_scalar, cudaS
 		m_nerf.training.counters_rgb.loss.data(),
 		m_stream.get()
 	);
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_train_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 
 	m_timer.m_nerf_optimizer_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	m_trainer->optimizer_step(stream, LOSS_SCALE);
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_optimizer_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	m_mem_tracker.m_nerf_optimizer_end = get_allocatd_momory_size();
 
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_envmap_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	++m_training_step;
 
 	if (envmap_gradient) {
 		m_envmap.trainer->optimizer_step(stream, LOSS_SCALE);
 	}
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_envmap_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 
 	m_timer.m_nerf_rgb_loss_scalar_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
@@ -2855,6 +2861,7 @@ void Testbed::train_nerf(uint32_t target_batch_size, bool get_loss_scalar, cudaS
 		m_train = false;
 		m_train_aborting = true;
 	}
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_rgb_loss_scalar_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 
 	m_timer.m_nerf_compute_cdf_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
@@ -2912,6 +2919,7 @@ void Testbed::train_nerf(uint32_t target_batch_size, bool get_loss_scalar, cudaS
 
 		m_nerf.training.n_steps_between_error_map_updates = (uint32_t)(m_nerf.training.n_steps_between_error_map_updates * 1.5f);
 	}
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_compute_cdf_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 
 	m_timer.m_nerf_train_extra_dims_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
@@ -2945,6 +2953,7 @@ void Testbed::train_nerf(uint32_t target_batch_size, bool get_loss_scalar, cudaS
 		//m_nerf.training.extra_dims_gpu.copy_from_host(extra_dims_new_values);
 		CUDA_CHECK_THROW(cudaMemcpyAsync(m_nerf.training.extra_dims_gpu.data(), extra_dims_new_values.data(), m_nerf.training.n_images_for_training * n_extra_dims * sizeof(float) , cudaMemcpyHostToDevice, stream));
 	}
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_train_extra_dims_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 
 	m_timer.m_nerf_train_camera_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
@@ -3028,6 +3037,7 @@ void Testbed::train_nerf(uint32_t target_batch_size, bool get_loss_scalar, cudaS
 
 		m_nerf.training.n_steps_since_cam_update = 0;
 	}
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_train_camera_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 }
 
@@ -3113,6 +3123,7 @@ void Testbed::train_nerf_step(uint32_t target_batch_size, uint32_t n_rays_per_ba
 
 	CUDA_CHECK_THROW(cudaMemsetAsync(ray_counter, 0, sizeof(uint32_t), stream));
 
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_train_sampling_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	linear_kernel(generate_training_samples_nerf, 0, stream,
 		n_rays_per_batch,
@@ -3144,6 +3155,7 @@ void Testbed::train_nerf_step(uint32_t target_batch_size, uint32_t n_rays_per_ba
 		m_nerf.training.extra_dims_gpu.data(),
 		m_nerf_network->n_extra_dims()
 	);
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_train_sampling_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	m_mem_tracker.m_nerf_train_sampling_end = get_allocatd_momory_size();
 
@@ -3152,8 +3164,10 @@ void Testbed::train_nerf_step(uint32_t target_batch_size, uint32_t n_rays_per_ba
 		hg_enc->set_max_level_gpu(m_max_level_rand_training ? max_level : nullptr);
 	}
 
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_train_inference_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	m_network->inference_mixed_precision(stream, coords_matrix, rgbsigma_matrix, false);
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_train_inference_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	m_mem_tracker.m_nerf_train_inference_end = get_allocatd_momory_size();
 
@@ -3161,6 +3175,7 @@ void Testbed::train_nerf_step(uint32_t target_batch_size, uint32_t n_rays_per_ba
 		hg_enc->set_max_level_gpu(m_max_level_rand_training ? max_level_compacted : nullptr);
 	}
 
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_train_loss_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	linear_kernel(compute_loss_kernel_train_nerf, 0, stream,
 		n_rays_per_batch,
@@ -3213,6 +3228,7 @@ void Testbed::train_nerf_step(uint32_t target_batch_size, uint32_t n_rays_per_ba
 		m_nerf.training.depth_supervision_lambda,
 		m_nerf.training.near_distance
 	);
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_train_loss_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	m_mem_tracker.m_nerf_train_loss_end = get_allocatd_momory_size();
 
@@ -3232,11 +3248,14 @@ void Testbed::train_nerf_step(uint32_t target_batch_size, uint32_t n_rays_per_ba
 	GPUMatrix<float> coords_gradient_matrix((float*)coords_gradient, floats_per_coord, target_batch_size);
 
 	{
+		cudaDeviceSynchronize();
 		m_timer.m_nerf_train_forward = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 		auto ctx = m_network->forward(stream, compacted_coords_matrix, &compacted_rgbsigma_matrix, false, prepare_input_gradients);
 		m_mem_tracker.m_nerf_train_forward_end = get_allocatd_momory_size();
+		cudaDeviceSynchronize();
 		m_timer.m_nerf_train_backward = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 		m_network->backward(stream, *ctx, compacted_coords_matrix, compacted_rgbsigma_matrix, gradient_matrix, prepare_input_gradients ? &coords_gradient_matrix : nullptr, false, EGradientMode::Overwrite);
+		cudaDeviceSynchronize();
 		m_timer.m_nerf_train_backward_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 		m_mem_tracker.m_nerf_train_backward_end = get_allocatd_momory_size();
 	}

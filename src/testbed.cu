@@ -2482,11 +2482,13 @@ void Testbed::train(uint32_t batch_size) {
 		return;
 	}
 
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_reset_accumulation_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	if (!m_dlss) {
 		// No immediate redraw necessary
 		reset_accumulation(false, false);
 	}
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_reset_accumulation_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 
 	m_timer.m_nerf_train_prep_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
@@ -2507,9 +2509,11 @@ void Testbed::train(uint32_t batch_size) {
 
 		CUDA_CHECK_THROW(cudaStreamSynchronize(m_stream.get()));
 	}
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_train_prep_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	m_mem_tracker.m_nerf_train_prep_end = get_allocatd_momory_size();
 
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_update_hyperparam_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 	// Find leaf optimizer and update its settings
 	json* leaf_optimizer_config = &m_network_config["optimizer"];
@@ -2519,6 +2523,7 @@ void Testbed::train(uint32_t batch_size) {
 	(*leaf_optimizer_config)["optimize_matrix_params"] = m_train_network;
 	(*leaf_optimizer_config)["optimize_non_matrix_params"] = m_train_encoding;
 	m_optimizer->update_hyperparams(m_network_config["optimizer"]);
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_update_hyperparam_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 
 	bool get_loss_scalar = m_training_step % 16 == 0;
@@ -2537,6 +2542,7 @@ void Testbed::train(uint32_t batch_size) {
 			default: throw std::runtime_error{"Invalid training mode."};
 		}
 
+		cudaDeviceSynchronize();
 		m_timer.m_nerf_update_loss_graph_start = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 		CUDA_CHECK_THROW(cudaStreamSynchronize(m_stream.get()));
 	}
@@ -2545,6 +2551,7 @@ void Testbed::train(uint32_t batch_size) {
 	if (get_loss_scalar) {
 		update_loss_graph();
 	}
+	cudaDeviceSynchronize();
 	m_timer.m_nerf_update_loss_graph_end = (std::chrono::system_clock::now() - m_timer.m_timer_start).count();
 }
 
