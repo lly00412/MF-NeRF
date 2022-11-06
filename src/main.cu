@@ -232,6 +232,23 @@ int main(int argc, char** argv) {
 			testbed.init_window(width_flag ? get(width_flag) : 1920, height_flag ? get(height_flag) : 1080);
 		}
 
+		///////////
+		// Read GPU properties
+		cudaDeviceProp properties;
+    	int device_idx;
+    	cudaError_t result = cudaGetDevice(&device_idx);
+
+		if (result != cudaSuccess) {
+		throw std::runtime_error("cudaGetDevice() API call failed.");
+		}
+
+    	result = cudaGetDeviceProperties(&properties, device_idx);
+
+		tlog::info() << "GPU: " << properties.name << "[" << device_idx << "]";
+		tlog::info() << "L2 Cache Size: " << properties.l2CacheSize / 1024 / 1024 << " MB";
+		tlog::info() << "Max Persistent L2 Cache Size: " << properties.persistingL2CacheMaxSize / 1024 / 1024 << " MB";
+		///////////
+
 		// Render/training loop
 		uint32_t n_steps = n_steps_flag ? get(n_steps_flag) : 35000;
 		uint32_t step = 0;
