@@ -47,6 +47,13 @@ int main(int argc, char** argv) {
 		{'m', "mode"},
 	};
 
+	ValueFlag<uint32_t> n_steps_flag{
+		parser,
+		"N_STEPS",
+		"Number of steps to train for before quitting.",
+		{"n_steps"},
+	};
+
 	ValueFlag<string> network_config_flag{
 		parser,
 		"CONFIG",
@@ -226,7 +233,9 @@ int main(int argc, char** argv) {
 		}
 
 		// Render/training loop
-		while (testbed.frame()) {
+		uint32_t n_steps = n_steps_flag ? get(n_steps_flag) : 35000;
+		uint32_t step = 0;
+		while (step++ < n_steps && testbed.frame()) {
 			if (!gui) {
 				tlog::info() << "iteration=" << testbed.m_training_step << " loss=" << testbed.m_loss_scalar.val();
 			}
