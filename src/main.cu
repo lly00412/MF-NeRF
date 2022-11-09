@@ -246,7 +246,10 @@ int main(int argc, char** argv) {
 
 		tlog::info() << "GPU: " << properties.name << "[" << device_idx << "]";
 		tlog::info() << "L2 Cache Size: " << properties.l2CacheSize / 1024 / 1024 << " MB";
-		tlog::info() << "Max Persistent L2 Cache Size: " << properties.persistingL2CacheMaxSize / 1024 / 1024 << " MB";
+		tlog::info() << "Max Persistent L2 Cache Size: " << properties.persistingL2CacheMaxSize / 1024.f / 1024.f << " MB";
+		tlog::info() << "Max Access Window Size: " << properties.accessPolicyMaxWindowSize / 1024.f / 1024.f << " MB";
+
+		testbed.set_max_access_window_size(properties.accessPolicyMaxWindowSize);
 		///////////
 
 		// Render/training loop

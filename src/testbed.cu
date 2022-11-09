@@ -244,6 +244,27 @@ void Testbed::set_view_dir(const Vector3f& dir) {
 	set_look_at(old_look_at);
 }
 
+void Testbed::set_max_access_window_size(size_t size = 0) {
+	if (size == 0) {
+		cudaDeviceProp properties;
+    	int device_idx;
+    	cudaError_t result = cudaGetDevice(&device_idx);
+
+		if (result != cudaSuccess) {
+		throw std::runtime_error("cudaGetDevice() API call failed.");
+		}
+
+    	result = cudaGetDeviceProperties(&properties, device_idx);
+
+		size = properties.accessPolicyMaxWindowSize;
+	}
+
+	auto enc = dynamic_cast<GridEncodingTemplated<network_precision_t>*>(m_nerf_network->encoding().get());
+	if (enc) {
+		enc->m_max_access_window_size = size;
+	}
+}
+
 void Testbed::first_training_view() {
 	m_nerf.training.view = 0;
 	set_camera_to_training_view(m_nerf.training.view);

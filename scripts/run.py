@@ -201,6 +201,7 @@ if __name__ == "__main__":
 	t_train_time_start = time.monotonic()
 	if n_steps > 0:
 		with tqdm(desc="Training", total=n_steps, unit="step") as t:
+			testbed.set_max_access_window_size(size=0)
 			while testbed.frame():
 				# # GPU warmup
 				# optimizer.zero_grad()

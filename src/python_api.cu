@@ -416,6 +416,10 @@ PYBIND11_MODULE(pyngp, m) {
 			"If the aabb parameter specifies an inside-out (\"empty\") box (default), the current render_aabb bounding box is used."
 		)
 		.def("random_seed", &Testbed::random_seed, "reset seed randomly")
+		.def("set_max_access_window_size", &Testbed::set_max_access_window_size,
+			py::arg("size") = 0,
+			"set max access window size of L2 cache. Default value is gpu::properties::accessPolicyMaxWindowSize."
+		)		
 		;
 
 	// Interesting members.

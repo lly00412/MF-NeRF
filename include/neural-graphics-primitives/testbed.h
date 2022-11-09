@@ -313,6 +313,7 @@ public:
 	Eigen::Vector3f view_up() const { return m_camera.col(1); }
 	Eigen::Vector3f view_side() const { return m_camera.col(0); }
 	void set_view_dir(const Eigen::Vector3f& dir);
+	void set_max_access_window_size(size_t size);
 	void first_training_view();
 	void last_training_view();
 	void previous_training_view();
@@ -563,6 +564,7 @@ public:
 		size_t m_nerf_optimizer_end;
 	} m_mem_tracker;
 
+	uint32_t m_cuda_access_policy_max_mindow_size = -1;
 
 	struct Nerf {
 		NerfTracer tracer;

@@ -961,6 +961,9 @@ public:
 	using grad_t = float;
 #endif
 
+	size_t m_max_access_window_size = 0;
+	bool print_gpu_setting = true;
+
 	GridEncodingTemplated(
 		uint32_t n_features,
 		uint32_t log2_hashmap_size,
@@ -1051,6 +1054,10 @@ public:
 		}
 	}
 
+	void set_max_access_window_size(const size_t max_window_size) {
+		m_max_access_window_size = max_window_size;
+	}
+
 	std::unique_ptr<Context> forward_impl(
 		cudaStream_t stream,
 		const GPUMatrixDynamic<float>& input,
@@ -1114,65 +1121,57 @@ public:
 		const float scale = exp2f((m_n_levels - 1) * std::log2(m_per_level_scale)) * m_base_resolution - 1.0f;
 		const uint32_t max_resolution = (uint32_t)(ceilf(scale)) + 1;
 
-		// ////////////////
-		// // Persistent cache setting
-		// if (m_grid_type == GridType::Window) {
-		// 	size_t const persistent_l2cache_size = m_offset_table.data[1] * N_FEATURES_PER_LEVEL * sizeof(T);
-		// 	// std::cout << "persistent_l2cache_size: " << persistent_l2cache_size << std::endl;
-		// 	cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, persistent_l2cache_size);
+		////////////////
+		// Persistent cache setting
+		cudaError_t cu_err;
+		size_t persistent_l2cache_size;
+		if (m_grid_type == GridType::Window) {
+			persistent_l2cache_size = std::min(m_max_access_window_size, m_offset_table.data[1] * N_FEATURES_PER_LEVEL * sizeof(T));
+			// std::cout << "persistent_l2cache_size: " << persistent_l2cache_size << std::endl;
+			cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, persistent_l2cache_size);
 
-		// 	cudaStreamAttrValue stream_attribute_thrashing;
-		// 	stream_attribute_thrashing.accessPolicyWindow.base_ptr = reinterpret_cast<void *>(use_inference_params ? m_grid_inference : m_grid);
-		// 	stream_attribute_thrashing.accessPolicyWindow.num_bytes = persistent_l2cache_size;
-		// 	stream_attribute_thrashing.accessPolicyWindow.hitRatio = 1.0;
-		// 	// non-tharashing
-		// 	// stream_attribute_thrashing.accessPolicyWindow.hitRatio =
-		// 	// 	std::min(static_cast<double>(num_megabytes_persistent_cache) / num_megabytes_persistent_data, 1.0);
-		// 	stream_attribute_thrashing.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
-		// 	stream_attribute_thrashing.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
+			cudaStreamAttrValue stream_attribute_thrashing;
+			stream_attribute_thrashing.accessPolicyWindow.base_ptr = reinterpret_cast<void *>(use_inference_params ? m_grid_inference : m_grid);
+			stream_attribute_thrashing.accessPolicyWindow.num_bytes = persistent_l2cache_size; // (Must be less than cudaDeviceProp::accessPolicyMaxWindowSize)
+			stream_attribute_thrashing.accessPolicyWindow.hitRatio = 1.0;
+			// non-tharashing
+			// stream_attribute_thrashing.accessPolicyWindow.hitRatio =
+			// 	std::min(static_cast<double>(num_megabytes_persistent_cache) / num_megabytes_persistent_data, 1.0);
+			stream_attribute_thrashing.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
+			stream_attribute_thrashing.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
 
-		// 	cudaStreamSetAttribute(synced_streams.get(0),
-		// 						   cudaStreamAttributeAccessPolicyWindow,
-		// 						   &stream_attribute_thrashing);
-		// } else if (m_grid_type == GridType::Hash) {
-		// 	size_t const persistent_l2cache_size = m_offset_table.data[m_n_levels] * N_FEATURES_PER_LEVEL * sizeof(T);
-		// 	// std::cout << "persistent_l2cache_size: " << persistent_l2cache_size << std::endl;
-		// 	cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, persistent_l2cache_size);
+			cu_err = cudaStreamSetAttribute(synced_streams.get(0),
+								   cudaStreamAttributeAccessPolicyWindow,
+								   &stream_attribute_thrashing);
+		} else if (m_grid_type == GridType::Hash) {
+			persistent_l2cache_size = std::min(m_max_access_window_size, m_offset_table.data[m_n_levels] * N_FEATURES_PER_LEVEL * sizeof(T));
+			// std::cout << "persistent_l2cache_size: " << persistent_l2cache_size << std::endl;
+			cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, persistent_l2cache_size);
 
-		// 	cudaStreamAttrValue stream_attribute_thrashing;
-		// 	stream_attribute_thrashing.accessPolicyWindow.base_ptr = reinterpret_cast<void *>(use_inference_params ? m_grid_inference : m_grid);
-		// 	stream_attribute_thrashing.accessPolicyWindow.num_bytes = persistent_l2cache_size;
-		// 	stream_attribute_thrashing.accessPolicyWindow.hitRatio = 1.0;
-		// 	// non-tharashing
-		// 	// stream_attribute_thrashing.accessPolicyWindow.hitRatio =
-		// 	// 	std::min(static_cast<double>(num_megabytes_persistent_cache) / num_megabytes_persistent_data, 1.0);
-		// 	stream_attribute_thrashing.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
-		// 	stream_attribute_thrashing.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
+			cudaStreamAttrValue stream_attribute_thrashing;
+			stream_attribute_thrashing.accessPolicyWindow.base_ptr = reinterpret_cast<void *>(use_inference_params ? m_grid_inference : m_grid);
+			stream_attribute_thrashing.accessPolicyWindow.num_bytes = persistent_l2cache_size; // (Must be less than cudaDeviceProp::accessPolicyMaxWindowSize)
+			stream_attribute_thrashing.accessPolicyWindow.hitRatio = 1.0;
+			// non-tharashing
+			// stream_attribute_thrashing.accessPolicyWindow.hitRatio =
+			// 	std::min(static_cast<double>(num_megabytes_persistent_cache) / num_megabytes_persistent_data, 1.0);
+			stream_attribute_thrashing.accessPolicyWindow.hitProp = cudaAccessPropertyPersisting;
+			stream_attribute_thrashing.accessPolicyWindow.missProp = cudaAccessPropertyStreaming;
 
-		// 	cudaStreamSetAttribute(synced_streams.get(0),
-		// 						   cudaStreamAttributeAccessPolicyWindow,
-		// 						   &stream_attribute_thrashing);
-		// }
-		// ////////////////
+			cu_err = cudaStreamSetAttribute(synced_streams.get(0),
+								   cudaStreamAttributeAccessPolicyWindow,
+								   &stream_attribute_thrashing);
+		}
 
+		if (cu_err != cudaSuccess) {
+			std::cout << cudaGetErrorName(cu_err) << " : " << cudaGetErrorString(cu_err) << std::endl;
+		} 
 
-		// ///////////
-		// // Read GPU properties
-		// cudaDeviceProp properties;
-    	// int device_idx;
-    	// cudaError_t result = cudaGetDevice(&device_idx);
-
-		// if (result != cudaSuccess) {
-		// throw std::runtime_error("cudaGetDevice() API call failed.");
-		// }
-
-    	// result = cudaGetDeviceProperties(&properties, device_idx);
-
-		// std::cout << "GPU: " << properties.name << "[" << device_idx << "]" << std::endl;
-		// std::cout << "L2 Cache Size: " << properties.l2CacheSize << " MB" << std::endl;
-		// std::cout << "Max Persistent L2 Cache Size: " << properties.persistingL2CacheMaxSize << " MB" << std::endl;
-		// ///////////
-
+		if (print_gpu_setting) {
+			print_gpu_setting = false;
+			std::cout << "set persistent_l2cache_size : " << persistent_l2cache_size << std::endl;
+		}
+		////////////////
 
 		// cudaProfilerStart();
 		// synced_streams : associated stream
@@ -1194,11 +1193,6 @@ public:
 			forward->dy_dx.data()
 		);
 		// cudaProfilerStop();
-
-		cudaError_t cu_err = cudaGetLastError();
-		if (cu_err != cudaSuccess) {
-			std::cout << cudaGetErrorName(cu_err) << " " << cudaGetErrorString(cu_err) << std::endl;
-		}
 
 		if (output && output->layout() == AoS) {
 			// Transpose result (was stored row major due to coalescing)
