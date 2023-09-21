@@ -7,6 +7,7 @@ import imageio
 import numpy as np
 import cv2
 from einops import rearrange
+import os
 
 # data
 from torch.utils.data import DataLoader
@@ -39,6 +40,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.utilities.distributed import all_gather_ddp_if_available
 
 from utils import slim_ckpt, load_ckpt
+import time
 
 import warnings; warnings.filterwarnings("ignore")
 
@@ -247,6 +249,7 @@ class NeRFSystem(LightningModule):
 
 
 if __name__ == '__main__':
+    start = time.time()
     hparams = get_opts()
     pytorch_lightning.seed_everything(hparams.seed)
     if hparams.val_only and (not hparams.ckpt_path):
@@ -266,6 +269,7 @@ if __name__ == '__main__':
                               save_top_k=-1)
     callbacks = [ckpt_cb, TQDMProgressBar(refresh_rate=1)]
 
+    os.makedirs(os.path.join(f"logs/{hparams.dataset_name}", hparams.exp_name), exist_ok=True)
     logger = TensorBoardLogger(save_dir=f"logs/{hparams.dataset_name}",
                                name=hparams.exp_name,
                                default_hp_metric=False)
@@ -301,3 +305,7 @@ if __name__ == '__main__':
         imageio.mimsave(os.path.join(system.val_dir, 'depth.mp4'),
                         [imageio.imread(img) for img in imgs[1::2]],
                         fps=30, macro_block_size=1)
+
+    end = time.time()
+    runtime = time.strftime("%H:%M:%S", time.gmtime(end - start))
+    print('Total runtime: {}'.format(runtime))
