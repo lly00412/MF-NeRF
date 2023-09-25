@@ -6,7 +6,7 @@ for SCENES in ${scenes[@]}
 do
 echo ${SCENES}
 ### mfnerf T20 128ch
-CUDA_VISIBLE_DEVICES=0 \
+CUDA_VISIBLE_DEVICES=1 \
 python train.py \
     --root_dir /mnt/Data2/datasets/nerf_llff_data/${SCENES} \
     --dataset_name colmap \
