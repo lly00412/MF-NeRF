@@ -13,7 +13,8 @@ class NGP(nn.Module):
     def __init__(self, scale, hparams, rgb_act='Sigmoid'):
         super().__init__()
 
-        self.rgb_act = rgb_act
+        if not rgb_act=='None':
+            self.rgb_act = nn.Sigmoid()
 
         # scene bounding box
         self.scale = scale
@@ -66,17 +67,29 @@ class NGP(nn.Module):
                 },
             )
 
-        self.rgb_net = \
-            tcnn.Network(
-                n_input_dims=32, n_output_dims=3,
-                network_config={
-                    "otype": "FullyFusedMLP",
-                    "activation": "ReLU",
-                    "output_activation": self.rgb_act,
-                    "n_neurons": hparams.rgb_channels,
-                    "n_hidden_layers": hparams.rgb_layers,
-                }
-            )
+        # self.rgb_net = \
+            # tcnn.Network(
+            #     n_input_dims=32, n_output_dims=3,
+            #     network_config={
+            #         "otype": "FullyFusedMLP",
+            #         "activation": "ReLU",
+            #         "output_activation": self.rgb_act,
+            #         "n_neurons": hparams.rgb_channels,
+            #         "n_hidden_layers": hparams.rgb_layers,
+            #     }
+            # )
+        self.rgb_net = torch.nn.Sequential(
+            nn.Linear(32, 128,bias=False),
+            nn.ReLU(),
+            nn.Dropout(p=0),
+            nn.Linear(128, 128,bias=False),
+            nn.ReLU(),
+            nn.Linear(128, 128,bias=False),
+            nn.ReLU(),
+            nn.Dropout(p=0),
+            nn.Linear(128, 3,bias=False),
+            self.rgb_act,
+        )
 
         if self.rgb_act == 'None': # rgb_net output is log-radiance
             for i in range(3): # independent tonemappers for r,g,b

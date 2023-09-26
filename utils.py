@@ -1,5 +1,16 @@
 import torch
 
+def enable_dropout(model,p=0.2):
+    """ Function to enable the dropout layers during test-time """
+    for m in model.modules():
+        if m.__class__.__name__.startswith('Dropout'):
+            m.train()
+            m.p=p
+
+def close_dropout(model):
+    for m in model.modules():
+        if m.__class__.__name__.startswith('Dropout'):
+            m.eval()
 
 def extract_model_state_dict(ckpt_path, model_name='model', prefixes_to_ignore=[]):
     checkpoint = torch.load(ckpt_path, map_location='cpu')

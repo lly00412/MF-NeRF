@@ -58,6 +58,16 @@ def get_opts():
                         help='run only validation (need to provide ckpt_path)')
     parser.add_argument('--no_save_test', action='store_true', default=False,
                         help='whether to save test image and video')
+    parser.add_argument('--save_output', action='store_true', default=False,
+                        help='save the raw outputs')
+    parser.add_argument('--save_video', action='store_true', default=False,
+                        help='save the render video')
+
+    # mcdropout
+    parser.add_argument("--mcdropout", action='store_true',
+                        help='if do mc_dropout')
+    parser.add_argument("--n_passes", type=int, default=10,
+                        help='number of passes for mc_dropout')
 
     # misc
     parser.add_argument('--exp_name', type=str, default='exp',
