@@ -79,6 +79,15 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         # the number of samples to add on each ray
         N_samples = max(min(N_rays//N_alive, 64), min_samples)
         samples += N_samples
+        # print('N_rays:{}'.format(N_rays))
+        # print('N_alive:{}'.format(N_alive))
+        # print('N_rays / N_alive: {}'.format(N_rays//N_alive))
+        # print('samples:{}'.format(samples))
+        # print(rays_o.size())
+        # print(rays_d.size())
+        # print(hits_t[:,0].size())
+        # print(alive_indices.size())
+        # print(N_samples)
 
         xyzs, dirs, deltas, ts, N_eff_samples = \
             vren.raymarching_test(rays_o, rays_d, hits_t[:, 0], alive_indices,
@@ -91,10 +100,25 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         valid_mask = ~torch.all(dirs==0, dim=1)
         if valid_mask.sum()==0: break
 
+        ################# TO SOLVE THE MEMORY PROBLEM ##################
+        sp_idx = valid_mask.size(0)//2
+        valid_mask1 = torch.zeros(valid_mask.size(),dtype=torch.bool)
+        valid_mask1[:sp_idx] = valid_mask[:sp_idx]
+        valid_mask2 = torch.zeros(valid_mask.size(),dtype=torch.bool)
+        valid_mask2[sp_idx:] = valid_mask[sp_idx:]
+
+        #############################################################
+
         sigmas = torch.zeros(len(xyzs), device=device)
         rgbs = torch.zeros(len(xyzs), 3, device=device)
-        sigmas[valid_mask], _rgbs = model(xyzs[valid_mask], dirs[valid_mask], **kwargs)
-        rgbs[valid_mask] = _rgbs.float()
+        # sigmas[valid_mask], _rgbs = model(xyzs[valid_mask], dirs[valid_mask], **kwargs)
+        # rgbs[valid_mask] = _rgbs.float()
+
+        sigmas[valid_mask1], _rgbs = model(xyzs[valid_mask1], dirs[valid_mask1], **kwargs)
+        rgbs[valid_mask1] = _rgbs.float()
+        sigmas[valid_mask2], _rgbs = model(xyzs[valid_mask2], dirs[valid_mask2], **kwargs)
+        rgbs[valid_mask2] = _rgbs.float()
+
         sigmas = rearrange(sigmas, '(n1 n2) -> n1 n2', n2=N_samples)
         rgbs = rearrange(rgbs, '(n1 n2) c -> n1 n2 c', n2=N_samples)
 

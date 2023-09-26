@@ -199,40 +199,41 @@ class NeRFSystem(LightningModule):
             self.val_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}'
             os.makedirs(self.val_dir, exist_ok=True)
 
-    def sub_batch_val(self,batch):
-        torch.cuda.empty_cache()
-        # print(batch.keys())
-        sub_batches = int(np.ceil(batch['rgb'].size(0) / self.hparams.batch_size))
-        results = {'opacity':[],
-                   'depth':[],
-                   'rgb': [],
-                   'total_samples': 0}
-        for i_sub in range(sub_batches):
-            start = int(i_sub * self.hparams.batch_size)
-            end = min(int((i_sub + 1) * self.hparams.batch_size),batch['rgb'].size(0))
-            sub_batch = {'rgb': batch['rgb'][start:end],
-                         'pose': batch['pose'][start:end],
-                         'img_idxs': batch['img_idxs']}
-            sub_result = self(sub_batch, split='test')
-            results['opacity'].append(sub_result['opacity'])
-            results['depth'].append(sub_result['depth'])
-            results['rgb'].append(sub_result['rgb'])
-            results['total_samples'] += sub_result['total_samples']
-            # print(results.keys())  # ['opacity', 'depth', 'rgb', 'total_samples']
-            # print(results['total_samples'])  # tensor(0, device='cuda:0')
-            # print(results['opacity'].size())  # (h w)
-            # print(results['depth'].size())  # (h w)
-            # print(results['rgb'].size())  # (h w) c
-        results['opacity'] = torch.cat(results['opacity'])
-        results['depth'] = torch.cat(results['depth'])
-        results['rgb'] = torch.cat(results['rgb'])
-
-        return results
+    # def sub_batch_val(self,batch):
+    #     torch.cuda.empty_cache()
+    #     # print(batch.keys())
+    #     sub_batches = int(np.ceil(batch['rgb'].size(0) / self.hparams.batch_size))
+    #     results = {'opacity':[],
+    #                'depth':[],
+    #                'rgb': [],
+    #                'total_samples': 0}
+    #     for i_sub in range(sub_batches):
+    #         start = int(i_sub * self.hparams.batch_size)
+    #         end = min(int((i_sub + 1) * self.hparams.batch_size),batch['rgb'].size(0))
+    #         sub_batch = {'rgb': batch['rgb'][start:end],
+    #                      'pose': batch['pose'][start:end],
+    #                      'img_idxs': batch['img_idxs']}
+    #         sub_result = self(sub_batch, split='test')
+    #         results['opacity'].append(sub_result['opacity'])
+    #         results['depth'].append(sub_result['depth'])
+    #         results['rgb'].append(sub_result['rgb'])
+    #         results['total_samples'] += sub_result['total_samples']
+    #         # print(results.keys())  # ['opacity', 'depth', 'rgb', 'total_samples']
+    #         # print(results['total_samples'])  # tensor(0, device='cuda:0')
+    #         # print(results['opacity'].size())  # (h w)
+    #         # print(results['depth'].size())  # (h w)
+    #         # print(results['rgb'].size())  # (h w) c
+    #     results['opacity'] = torch.cat(results['opacity'])
+    #     results['depth'] = torch.cat(results['depth'])
+    #     results['rgb'] = torch.cat(results['rgb'])
+    #
+    #     return results
 
     def validation_step(self, batch, batch_nb):
         # print(batch.keys()) #dict_keys(['pose', 'img_idxs', 'rgb'])
         rgb_gt = batch['rgb']
-        results = self.sub_batch_val(batch)
+        results = self(batch,split='test')
+
         logs = {}
         # compute each metric per image
         self.val_psnr(results['rgb'], rgb_gt)
@@ -245,11 +246,17 @@ class NeRFSystem(LightningModule):
         self.val_ssim(rgb_pred, rgb_gt)
         logs['ssim'] = self.val_ssim.compute()
         self.val_ssim.reset()
+        torch.cuda.empty_cache()
         if self.hparams.eval_lpips:
-            self.val_lpips(torch.clip(rgb_pred*2-1, -1, 1),
-                           torch.clip(rgb_gt*2-1, -1, 1))
-            logs['lpips'] = self.val_lpips.compute()
+            self.val_lpips(torch.clip(rgb_pred[:,:,:,:w//2]*2-1, -1, 1),
+                           torch.clip(rgb_gt[:,:,:,:w//2]*2-1, -1, 1))
+            score1 = self.val_lpips.compute()
             self.val_lpips.reset()
+            self.val_lpips(torch.clip(rgb_pred[:, :, :, w//2 :] * 2 - 1, -1, 1),
+                           torch.clip(rgb_gt[:, :, :, w//2 :] * 2 - 1, -1, 1))
+            score2 = self.val_lpips.compute()
+            self.val_lpips.reset()
+            logs['lpips'] = (score1+score2).mean()
 
         ###################################################
         #              MC-Dropout
@@ -260,11 +267,11 @@ class NeRFSystem(LightningModule):
             mcd_rgb_preds = []
             print('Start MC-Dropout...')
             for N in trange(self.hparams.n_passes):
-                mcd_results = self.sub_batch_val(batch)
+                mcd_results = self(batch,split='test')
                 #mcd_rgb_pred = rearrange(mcd_results['rgb'], '(h w) c -> 1 c h w', h=h) # torch (1,3,h,w)
                 mcd_rgb_preds.append(mcd_results['rgb']) # (h w) c
             mcd_rgb_preds = torch.stack(mcd_rgb_preds,0) # n (h w) c
-            results['uncert'] = mcd_rgb_preds.std(-1).mean(0) # (h w)
+            results['uncert'] = mcd_rgb_preds.var(0).mean(-1) # (h w) c
             close_dropout(self.model.rgb_net)
         ###################################################
 
@@ -274,7 +281,7 @@ class NeRFSystem(LightningModule):
 
             ###### add errs ###########
             rgb_gt = rearrange(batch['rgb'].cpu().numpy(), '(h w) c -> h w c', h=h)
-            err = rgb_gt - rgb_pred
+            err = (rgb_gt - rgb_pred)**2
             rgb_gt = (rgb_gt * 255).astype(np.uint8)
             ############################
 
@@ -286,13 +293,12 @@ class NeRFSystem(LightningModule):
             ########### save uncerts ##################
             if self.hparams.mcdropout:
                 u_pred = err2img(rearrange(results['uncert'].cpu().numpy(), '(h w) -> h w', h=h))
-                err = err2img(rearrange(err.mean(-1), '(h w) -> h w', h=h))
+                err = err2img(err.mean(-1))
                 imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_gt.png'), rgb_gt)
                 imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), err)
                 imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_u.png'), u_pred)
 
-        raise ValueError('Stop debugging!')
-
+        del rgb_gt,rgb_pred,err,depth,results
         return logs
 
     def validation_epoch_end(self, outputs):
@@ -320,14 +326,14 @@ if __name__ == '__main__':
     start = time.time()
     hparams = get_opts()
     pytorch_lightning.seed_everything(hparams.seed)
-    # if hparams.val_only and (not hparams.ckpt_path):
-    #     raise ValueError('You need to provide a @ckpt_path for validation!')
+    if hparams.val_only and (not hparams.ckpt_path):
+        raise ValueError('You need to provide a @ckpt_path for validation!')
 
-    # if hparams.val_only:
-    #     system = NeRFSystem.load_from_checkpoint(hparams.ckpt_path, strict=False, hparams=hparams)
-    # else:
-    #     system = NeRFSystem(hparams)
-    system = NeRFSystem(hparams)
+    if hparams.val_only:
+        system = NeRFSystem.load_from_checkpoint(hparams.ckpt_path, strict=False, hparams=hparams)
+    else:
+        system = NeRFSystem(hparams)
+    #system = NeRFSystem(hparams)
 
     ckpt_cb = ModelCheckpoint(dirpath=f'ckpts/{hparams.dataset_name}/{hparams.exp_name}',
                               filename='{epoch:d}',
