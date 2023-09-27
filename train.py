@@ -199,38 +199,10 @@ class NeRFSystem(LightningModule):
             self.val_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}'
             os.makedirs(self.val_dir, exist_ok=True)
 
-    # def sub_batch_val(self,batch):
-    #     torch.cuda.empty_cache()
-    #     # print(batch.keys())
-    #     sub_batches = int(np.ceil(batch['rgb'].size(0) / self.hparams.batch_size))
-    #     results = {'opacity':[],
-    #                'depth':[],
-    #                'rgb': [],
-    #                'total_samples': 0}
-    #     for i_sub in range(sub_batches):
-    #         start = int(i_sub * self.hparams.batch_size)
-    #         end = min(int((i_sub + 1) * self.hparams.batch_size),batch['rgb'].size(0))
-    #         sub_batch = {'rgb': batch['rgb'][start:end],
-    #                      'pose': batch['pose'][start:end],
-    #                      'img_idxs': batch['img_idxs']}
-    #         sub_result = self(sub_batch, split='test')
-    #         results['opacity'].append(sub_result['opacity'])
-    #         results['depth'].append(sub_result['depth'])
-    #         results['rgb'].append(sub_result['rgb'])
-    #         results['total_samples'] += sub_result['total_samples']
-    #         # print(results.keys())  # ['opacity', 'depth', 'rgb', 'total_samples']
-    #         # print(results['total_samples'])  # tensor(0, device='cuda:0')
-    #         # print(results['opacity'].size())  # (h w)
-    #         # print(results['depth'].size())  # (h w)
-    #         # print(results['rgb'].size())  # (h w) c
-    #     results['opacity'] = torch.cat(results['opacity'])
-    #     results['depth'] = torch.cat(results['depth'])
-    #     results['rgb'] = torch.cat(results['rgb'])
-    #
-    #     return results
-
     def validation_step(self, batch, batch_nb):
         # print(batch.keys()) #dict_keys(['pose', 'img_idxs', 'rgb'])
+        outputs = {'data':{},
+                   'eval':{}}
         rgb_gt = batch['rgb']
         results = self(batch,split='test')
 
@@ -239,6 +211,7 @@ class NeRFSystem(LightningModule):
         self.val_psnr(results['rgb'], rgb_gt)
         logs['psnr'] = self.val_psnr.compute()
         self.val_psnr.reset()
+        outputs['eval']['psnr'] = logs['psnr']
 
         w, h = self.train_dataset.img_wh
         rgb_pred = rearrange(results['rgb'], '(h w) c -> 1 c h w', h=h)
@@ -246,6 +219,7 @@ class NeRFSystem(LightningModule):
         self.val_ssim(rgb_pred, rgb_gt)
         logs['ssim'] = self.val_ssim.compute()
         self.val_ssim.reset()
+        outputs['eval']['ssim'] = logs['ssim']
         torch.cuda.empty_cache()
         if self.hparams.eval_lpips:
             self.val_lpips(torch.clip(rgb_pred[:,:,:,:w//2]*2-1, -1, 1),
@@ -257,6 +231,7 @@ class NeRFSystem(LightningModule):
             score2 = self.val_lpips.compute()
             self.val_lpips.reset()
             logs['lpips'] = (score1+score2).mean()
+            outputs['eval']['lpips'] = logs['lpips']
 
         ###################################################
         #              MC-Dropout
@@ -278,27 +253,36 @@ class NeRFSystem(LightningModule):
         if not self.hparams.no_save_test: # save test image to disk
             idx = batch['img_idxs']
             rgb_pred = rearrange(results['rgb'].cpu().numpy(), '(h w) c -> h w c', h=h)
+            outputs['data']['rgb_pred'] = rgb_pred
 
             ###### add errs ###########
             rgb_gt = rearrange(batch['rgb'].cpu().numpy(), '(h w) c -> h w c', h=h)
+            outputs['data']['rgb_gt'] = rgb_gt
             err = (rgb_gt - rgb_pred)**2
             rgb_gt = (rgb_gt * 255).astype(np.uint8)
             ############################
 
             rgb_pred = (rgb_pred*255).astype(np.uint8)
-            depth = depth2img(rearrange(results['depth'].cpu().numpy(), '(h w) -> h w', h=h))
+            depth = rearrange(results['depth'].cpu().numpy(), '(h w) -> h w', h=h)
+            outputs['data']['depth'] = depth
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}.png'), rgb_pred)
-            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_d.png'), depth)
+            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_d.png'), depth2img(depth))
 
             ########### save uncerts ##################
             if self.hparams.mcdropout:
-                u_pred = err2img(rearrange(results['uncert'].cpu().numpy(), '(h w) -> h w', h=h))
-                err = err2img(err.mean(-1))
+                u_pred = rearrange(results['uncert'].cpu().numpy(), '(h w) -> h w', h=h)
+                outputs['data']['u_pred'] = u_pred
                 imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_gt.png'), rgb_gt)
-                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), err)
-                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_u.png'), u_pred)
+                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), err2img(err.mean(-1)))
+                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_u.png'), err2img(u_pred))
 
-        del rgb_gt,rgb_pred,err,depth,results
+            ########### save outputs ##################
+        if self.hparams.save_output:
+            idx = batch['img_idxs']
+            np.save(os.path.join(self.val_dir, f'{idx:03d}.npy'),outputs)
+
+        del rgb_gt,rgb_pred,err,depth,results,outputs
+
         return logs
 
     def validation_epoch_end(self, outputs):
@@ -333,7 +317,6 @@ if __name__ == '__main__':
         system = NeRFSystem.load_from_checkpoint(hparams.ckpt_path, strict=False, hparams=hparams)
     else:
         system = NeRFSystem(hparams)
-    #system = NeRFSystem(hparams)
 
     ckpt_cb = ModelCheckpoint(dirpath=f'ckpts/{hparams.dataset_name}/{hparams.exp_name}',
                               filename='{epoch:d}',
@@ -348,7 +331,7 @@ if __name__ == '__main__':
                                name=hparams.exp_name,
                                default_hp_metric=False)
 
-    trainer = Trainer(max_epochs=hparams.num_epochs,
+    trainer = Trainer(max_epochs=0 if hparams.val_only else hparams.num_epochs,
                       check_val_every_n_epoch=hparams.num_epochs,
                       callbacks=callbacks,
                       logger=logger,
