@@ -11,8 +11,10 @@ from .base import BaseDataset
 
 
 class NSVFDataset(BaseDataset):
-    def __init__(self, root_dir, split='train', downsample=1.0, **kwargs):
-        super().__init__(root_dir, split, downsample)
+    def __init__(self, root_dir, split='train', downsample=1.0, fewshot=0,fewshot_seed=340,**kwargs):
+        super().__init__(root_dir, split, downsample,fewshot,fewshot_seed)
+        self.fewshot = fewshot
+        self.seed = fewshot_seed
 
         self.read_intrinsics()
 
@@ -81,6 +83,13 @@ class NSVFDataset(BaseDataset):
             else: raise ValueError(f'{split} split not recognized!')
             img_paths = sorted(glob.glob(os.path.join(self.root_dir, 'rgb', prefix+'*.png')))
             poses = sorted(glob.glob(os.path.join(self.root_dir, 'pose', prefix+'*.txt')))
+
+
+            if self.fewshot>0:
+                np.random.seed(self.seed)
+                subs = np.random.choice(len(img_paths), self.fewshot)
+                img_paths = np.array(img_paths)[subs]
+                poses = np.array(poses)[subs]
 
             print(f'Loading {len(img_paths)} {split} images ...')
             for img_path, pose in tqdm(zip(img_paths, poses)):

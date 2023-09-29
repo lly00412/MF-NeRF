@@ -43,6 +43,7 @@ def get_opts():
                         help='number of gpus')
     parser.add_argument('--lr', type=float, default=1e-2,
                         help='learning rate')
+
     # experimental training options
     parser.add_argument('--optimize_ext', action='store_true', default=False,
                         help='whether to optimize extrinsics')
@@ -50,6 +51,10 @@ def get_opts():
                         help='''whether to train with random bg color (real scene only)
                         to avoid objects with black color to be predicted as transparent
                         ''')
+    parser.add_argument("--fewshot_seed", type=int, default=340,
+                        help='fewshot_seed')
+    parser.add_argument("--fewshot", type=int, default=0,
+                        help='if 0 not using fewshot, else: using fewshot')
 
     # validation options
     parser.add_argument('--eval_lpips', action='store_true', default=False,
@@ -68,6 +73,8 @@ def get_opts():
                         help='if do mc_dropout')
     parser.add_argument("--n_passes", type=int, default=10,
                         help='number of passes for mc_dropout')
+    parser.add_argument("--p", type=float, default=0.5,
+                        help='drop prob for mc_dropout')
 
     # misc
     parser.add_argument('--exp_name', type=str, default='exp',

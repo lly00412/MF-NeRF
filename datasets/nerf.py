@@ -11,8 +11,10 @@ from .base import BaseDataset
 
 
 class NeRFDataset(BaseDataset):
-    def __init__(self, root_dir, split='train', downsample=1.0, **kwargs):
-        super().__init__(root_dir, split, downsample)
+    def __init__(self, root_dir, split='train', downsample=1.0, fewshot=0,fewshot_seed=340,**kwargs):
+        super().__init__(root_dir, split, downsample,fewshot,fewshot_seed)
+        self.fewshot = fewshot
+        self.seed = fewshot_seed
 
         self.read_intrinsics()
 
@@ -46,6 +48,11 @@ class NeRFDataset(BaseDataset):
         else:
             with open(os.path.join(self.root_dir, f"transforms_{split}.json"), 'r') as f:
                 frames = json.load(f)["frames"]
+
+        if self.fewshot>0:
+            np.random.seed(self.seed)
+            subs = np.random.choice(len(frames), self.fewshot)
+            frames = np.array(frames)[subs]
 
         print(f'Loading {len(frames)} {split} images ...')
         for frame in tqdm(frames):

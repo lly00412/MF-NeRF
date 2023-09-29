@@ -13,8 +13,10 @@ from .base import BaseDataset
 
 
 class ColmapDataset(BaseDataset):
-    def __init__(self, root_dir, split='train', downsample=1.0, **kwargs):
-        super().__init__(root_dir, split, downsample)
+    def __init__(self, root_dir, split='train', downsample=1.0, fewshot=0,fewshot_seed=340,**kwargs):
+        super().__init__(root_dir, split, downsample,fewshot,fewshot_seed)
+        self.fewshot = fewshot
+        self.seed = fewshot_seed
 
         self.read_intrinsics()
 
@@ -123,7 +125,14 @@ class ColmapDataset(BaseDataset):
                 img_paths = [x for i, x in enumerate(img_paths) if i%8==0]
                 self.poses = np.array([x for i, x in enumerate(self.poses) if i%8==0])
 
+        if self.fewshot>0:
+            np.random.seed(self.seed)
+            subs = np.random.choice(len(img_paths), self.fewshot)
+            img_paths = np.array(img_paths)[subs]
+            self.poses = self.poses[subs]
+
         print(f'Loading {len(img_paths)} {split} images ...')
+
         for img_path in tqdm(img_paths):
             buf = [] # buffer for ray attributes: rgb, etc
 

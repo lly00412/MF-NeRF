@@ -44,8 +44,11 @@ from tqdm import trange
 
 import warnings; warnings.filterwarnings("ignore")
 
-def err2img(err):
-    err = (err / np.quantile(err, 0.9))*0.8
+def err2img(err,flip=False):
+    if flip:
+        err = 1 - (err / np.quantile(err, 0.9))*0.8
+    else:
+        err = (err / np.quantile(err, 0.9))*0.8
     err_img = cv2.applyColorMap((err*255).astype(np.uint8),
                                   cv2.COLORMAP_JET)
     return err_img
@@ -112,7 +115,10 @@ class NeRFSystem(LightningModule):
         dataset = dataset_dict[self.hparams.dataset_name]
         kwargs = {'root_dir': self.hparams.root_dir,
                   'downsample': self.hparams.downsample}
-        self.train_dataset = dataset(split=self.hparams.split, **kwargs)
+        self.train_dataset = dataset(split=self.hparams.split,
+                                     fewshot=self.hparams.fewshot,
+                                     seed=self.hparams.fewshot_seed,
+                                     **kwargs)
         self.train_dataset.batch_size = self.hparams.batch_size
         self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
 
@@ -211,7 +217,7 @@ class NeRFSystem(LightningModule):
         self.val_psnr(results['rgb'], rgb_gt)
         logs['psnr'] = self.val_psnr.compute()
         self.val_psnr.reset()
-        outputs['eval']['psnr'] = logs['psnr']
+        outputs['eval']['psnr'] = logs['psnr'].cpu().numpy()
 
         w, h = self.train_dataset.img_wh
         rgb_pred = rearrange(results['rgb'], '(h w) c -> 1 c h w', h=h)
@@ -219,7 +225,7 @@ class NeRFSystem(LightningModule):
         self.val_ssim(rgb_pred, rgb_gt)
         logs['ssim'] = self.val_ssim.compute()
         self.val_ssim.reset()
-        outputs['eval']['ssim'] = logs['ssim']
+        outputs['eval']['ssim'] = logs['ssim'].cpu().numpy()
         torch.cuda.empty_cache()
         if self.hparams.eval_lpips:
             self.val_lpips(torch.clip(rgb_pred[:,:,:,:w//2]*2-1, -1, 1),
@@ -231,14 +237,14 @@ class NeRFSystem(LightningModule):
             score2 = self.val_lpips.compute()
             self.val_lpips.reset()
             logs['lpips'] = (score1+score2).mean()
-            outputs['eval']['lpips'] = logs['lpips']
+            outputs['eval']['lpips'] = logs['lpips'].cpu().numpy()
 
         ###################################################
         #              MC-Dropout
         ###################################################
 
         if self.hparams.mcdropout:
-            enable_dropout(self.model.rgb_net,p=0.2)
+            enable_dropout(self.model.rgb_net,p=self.hparams.p)
             mcd_rgb_preds = []
             print('Start MC-Dropout...')
             for N in trange(self.hparams.n_passes):
@@ -265,23 +271,23 @@ class NeRFSystem(LightningModule):
             rgb_pred = (rgb_pred*255).astype(np.uint8)
             depth = rearrange(results['depth'].cpu().numpy(), '(h w) -> h w', h=h)
             outputs['data']['depth'] = depth
-            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}.png'), rgb_pred)
+            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_pred.png'), rgb_pred)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_d.png'), depth2img(depth))
 
             ########### save uncerts ##################
             if self.hparams.mcdropout:
                 u_pred = rearrange(results['uncert'].cpu().numpy(), '(h w) -> h w', h=h)
-                outputs['data']['u_pred'] = u_pred
+                outputs['data']['mcd'] = u_pred
                 imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_gt.png'), rgb_gt)
                 imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), err2img(err.mean(-1)))
-                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_u.png'), err2img(u_pred))
+                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), err2img(u_pred))
 
             ########### save outputs ##################
         if self.hparams.save_output:
             idx = batch['img_idxs']
-            np.save(os.path.join(self.val_dir, f'{idx:03d}.npy'),outputs)
+            torch.save(outputs,os.path.join(self.val_dir, f'{idx:03d}.pth'))
 
-        del rgb_gt,rgb_pred,err,depth,results,outputs
+        del rgb_gt,rgb_pred,err,depth,results,batch
 
         return logs
 
