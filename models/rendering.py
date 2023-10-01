@@ -3,7 +3,7 @@ from .custom_functions import \
     RayAABBIntersector, RayMarcher, VolumeRenderer
 from einops import rearrange
 import vren
-
+import numpy as np
 MAX_SAMPLES = 1024
 NEAR_DISTANCE = 0.01
 
@@ -100,25 +100,26 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         valid_mask = ~torch.all(dirs==0, dim=1)
         if valid_mask.sum()==0: break
 
-        ################# TO SOLVE THE MEMORY PROBLEM ##################
-        sp_idx = valid_mask.size(0)//2
-        valid_mask1 = torch.zeros(valid_mask.size(),dtype=torch.bool)
-        valid_mask1[:sp_idx] = valid_mask[:sp_idx]
-        valid_mask2 = torch.zeros(valid_mask.size(),dtype=torch.bool)
-        valid_mask2[sp_idx:] = valid_mask[sp_idx:]
+        sigmas = torch.zeros(len(xyzs), device=device)
+        rgbs = torch.zeros(len(xyzs), 3, device=device)
+
+        ################# TO SOLVE THE MEMORY PROBLEM #################
+        N_trunks = 4
+        valid_mask = list(torch.chunk(valid_mask,chunks=N_trunks))
+        xyzs = list(torch.chunk(xyzs,chunks=N_trunks))
+        dirs = list(torch.chunk(dirs,chunks=N_trunks))
+        sigmas = list(torch.chunk(sigmas,chunks=N_trunks))
+        rgbs = list(torch.chunk(rgbs,chunks=N_trunks))
+
+        for t_idx in range(N_trunks):
+            sigmas[t_idx][valid_mask[t_idx]], _rgbs = model(xyzs[t_idx][valid_mask[t_idx]], dirs[t_idx][valid_mask[t_idx]], **kwargs)
+            rgbs[t_idx][valid_mask[t_idx]] = _rgbs.float()
+
 
         #############################################################
 
-        sigmas = torch.zeros(len(xyzs), device=device)
-        rgbs = torch.zeros(len(xyzs), 3, device=device)
-        # sigmas[valid_mask], _rgbs = model(xyzs[valid_mask], dirs[valid_mask], **kwargs)
-        # rgbs[valid_mask] = _rgbs.float()
-
-        sigmas[valid_mask1], _rgbs = model(xyzs[valid_mask1], dirs[valid_mask1], **kwargs)
-        rgbs[valid_mask1] = _rgbs.float()
-        sigmas[valid_mask2], _rgbs = model(xyzs[valid_mask2], dirs[valid_mask2], **kwargs)
-        rgbs[valid_mask2] = _rgbs.float()
-
+        sigmas = torch.cat(sigmas)
+        rgbs = torch.cat(rgbs)
         sigmas = rearrange(sigmas, '(n1 n2) -> n1 n2', n2=N_samples)
         rgbs = rearrange(rgbs, '(n1 n2) c -> n1 n2 c', n2=N_samples)
 

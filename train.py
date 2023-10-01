@@ -251,6 +251,7 @@ class NeRFSystem(LightningModule):
                 mcd_results = self(batch,split='test')
                 #mcd_rgb_pred = rearrange(mcd_results['rgb'], '(h w) c -> 1 c h w', h=h) # torch (1,3,h,w)
                 mcd_rgb_preds.append(mcd_results['rgb']) # (h w) c
+                del mcd_results
             mcd_rgb_preds = torch.stack(mcd_rgb_preds,0) # n (h w) c
             results['uncert'] = mcd_rgb_preds.var(0).mean(-1) # (h w) c
             close_dropout(self.model.rgb_net)
