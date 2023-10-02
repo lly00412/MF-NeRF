@@ -81,7 +81,7 @@ class NGP(nn.Module):
         self.rgb_net = torch.nn.Sequential(
             nn.Linear(32, 128,bias=False),
             nn.ReLU(),
-            nn.Dropout(p=0),
+            # nn.Dropout(p=0),
             nn.Linear(128, 128,bias=False),
             nn.ReLU(),
             nn.Linear(128, 128,bias=False),

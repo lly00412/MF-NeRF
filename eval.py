@@ -92,16 +92,27 @@ class  EvalNeRF:
         if 'flip' in self.hparams.est:
             self.data[s]['flip'] = self.flip(rgb_pred, rgb_gt)
 
+    def check_file_duplication(self,filename):
+        name, ext = os.path.splitext(filename)
+        filelist = glob.glob(f'{name}*{ext}')
+        if len(filelist)>0:
+            filename = f'{name}_v{len(filelist)}{ext}'
+        return filename
+
     def plot_metric(self,s):
         for key in self.hparams.est:
             if key=='flip':
                 imgs = self.data[s][key]
                 for idx in range(imgs.shape[0]):
-                    imageio.imsave(os.path.join(self.hparams.val_dir, s, f'{idx:03d}_{key}.png'), err2img(imgs[idx]))
+                    img_file = os.path.join(self.hparams.val_dir, s, f'{idx:03d}_{key}.png')
+                    img_file = self.check_file_duplication(img_file)
+                    imageio.imsave(img_file, err2img(imgs[idx]))
             if key in ['psnr','ssim']:
                 imgs = self.data[s][key]
                 for idx in range(imgs.shape[0]):
-                    imageio.imsave(os.path.join(self.hparams.val_dir, s, f'{idx:03d}_{key}.png'), err2img(imgs[idx],flip=True))
+                    img_file = os.path.join(self.hparams.val_dir, s, f'{idx:03d}_{key}.png')
+                    img_file = self.check_file_duplication(img_file)
+                    imageio.imsave(img_file, err2img(imgs[idx],flip=True))
 
     def compute_roc(self,opt,est,intervals = 20):
         ROC = []
@@ -179,9 +190,11 @@ class  EvalNeRF:
         fig.set_size_inches(20, 8)
         plt.rcParams.update({'font.size': 20})
         if not s=='avg':
-            fig.savefig(os.path.join(self.hparams.val_dir, s,'ROC_opt_vs_est.png'))
+            fig_file = os.path.join(self.hparams.val_dir, s,'ROC_opt_vs_est.png')
         else:
-            fig.savefig(os.path.join(self.hparams.val_dir, 'ROC_opt_vs_est.png'))
+            fig_file = os.path.join(self.hparams.val_dir, 'ROC_opt_vs_est.png')
+        fig_file = self.check_file_duplication(fig_file)
+        fig.savefig(fig_file)
         plt.close()
 
     def log_evals(self,s):
@@ -189,6 +202,7 @@ class  EvalNeRF:
             log_file = os.path.join(self.log_dir, s, self.hparams.log_file)
         else:
             log_file = os.path.join(self.log_dir, self.hparams.log_file)
+        log_file = self.check_file_duplication(log_file)
         with open(log_file,'a') as f:
             f.write(f'scene={s}\n')
             for score in self.evals[s].keys():

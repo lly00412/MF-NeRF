@@ -7,5 +7,5 @@ python eval.py --val_dir ${ROOT_DIR}/${EXP_NAME} \
       --scenes fern flower fortress horns leaves orchids room trex\
       --opt err \
       --est mcd psnr ssim flip \
-      --plot_roc \
-      --plot_metric
+      --plot_roc
+#      --plot_metric
