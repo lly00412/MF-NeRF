@@ -63,9 +63,9 @@ class NeRFLoss(nn.Module):
             rgb_p, u_p = self.soft_assignment(l2_loss.sqrt(),results['u_pred'],bins)
             kl_loss = []
             for i in range(rgb_p.size(-1)):
-                kl_loss.append(F.kl_div(u_p[:,i],rgb_p[:,i], reduction='mean'))
+                kl_loss.append(F.kl_div(u_p[:,i],rgb_p[:,i], reduction='mean').reshape(1))
             kl_loss = torch.cat(kl_loss)
-            kl_loss = kl_loss[None,:].expend(rgb_p.size(0),-1)
+            kl_loss = kl_loss[None,:].expand(l2_loss.size(0),-1)
             d['rgb'] = kg_loss+kl_loss
 
         o = results['opacity']+1e-10
@@ -82,11 +82,13 @@ class NeRFLoss(nn.Module):
     def soft_assignment(self, gt, est, bin_weights):
         # gt, est: (N_rays, 3)
         # bin_weights: (N_bins) in logspace
-        N_rays, N_channels = gt.size
+        N_rays, N_channels = gt.size()
         N_bins = bin_weights.size(0)
+        bin_weights = bin_weights.to(gt.device)
 
         miu = gt.mean(0).expand(N_bins, -1)  # (Nbins,3)
         sigma = gt.std(0).expand(N_bins, -1)  # (Nbins,3)
+
         gt_hat = miu + bin_weights[:, None].expand(-1, N_channels) * sigma  # (N_bins,3)
         gt_hat = gt_hat.expand(N_rays, -1, -1)  # (N_rays,N_bins,N_channels)
 
