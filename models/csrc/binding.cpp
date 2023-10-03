@@ -268,7 +268,7 @@ void composite_test_uncert_fw(
     const torch::Tensor N_eff_samples,
     torch::Tensor opacity,
     torch::Tensor depth,
-    torch::Tensor rgb
+    torch::Tensor rgb,
     torch::Tensor u_pred
 ){
     CHECK_INPUT(sigmas);

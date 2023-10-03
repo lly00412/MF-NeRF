@@ -23,8 +23,3 @@ python train.py \
     --val_only --ckpt_path ${CKPT_DIR}/${SCENES}/epoch=9.ckpt \
     --save_output
 done
-
-#--val_only --ckpt_path ${CKPT_DIR}/${SCENES}/epoch=19-val.ckpt \
-#    --mcdropout --n_passes 10 --p 0.5
-
-#

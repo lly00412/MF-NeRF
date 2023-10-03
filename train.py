@@ -68,7 +68,7 @@ class NeRFSystem(LightningModule):
         self.warmup_steps = 256
         self.update_interval = 16
 
-        self.loss = NeRFLoss(lambda_distortion=self.hparams.distortion_loss_w)
+        self.loss = NeRFLoss(lambda_distortion=self.hparams.distortion_loss_w,loss_type=self.hparams.loss)
         self.train_psnr = PeakSignalNoiseRatio(data_range=1)
         self.val_psnr = PeakSignalNoiseRatio(data_range=1)
         self.val_ssim = StructuralSimilarityIndexMeasure(data_range=1)
@@ -76,6 +76,9 @@ class NeRFSystem(LightningModule):
             self.val_lpips = LearnedPerceptualImagePatchSimilarity('vgg')
             for p in self.val_lpips.net.parameters():
                 p.requires_grad = False
+
+        if self.hparams.loss in ['kg','uc']:
+            self.hparams.uncert = True
 
         rgb_act = 'None' if self.hparams.use_exposure else 'Sigmoid'
         self.model = NGP(scale=self.hparams.scale, 
