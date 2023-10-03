@@ -260,7 +260,7 @@ class NeRFSystem(LightningModule):
                 mcd_rgb_preds.append(mcd_results['rgb']) # (h w) c
                 del mcd_results
             mcd_rgb_preds = torch.stack(mcd_rgb_preds,0) # n (h w) c
-            results['uncert'] = mcd_rgb_preds.mean(-1).var(0) # (h w) c
+            results['mcd'] = mcd_rgb_preds.mean(-1).var(0) # (h w) c
             close_dropout(self.model.rgb_net)
         ###################################################
 
@@ -281,21 +281,28 @@ class NeRFSystem(LightningModule):
             outputs['data']['depth'] = depth
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_pred.png'), rgb_pred)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_d.png'), depth2img(depth))
+            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_gt.png'), rgb_gt)
+            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), err2img(err.mean(-1)))
 
             ########### save uncerts ##################
+            if self.hparams.uncert:
+                u_pred = rearrange(results['u_pred'].cpu().numpy(), '(h w) c -> h w c', h=h)
+                outputs['data']['u_pred'] = u_pred
+                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_u.png'), err2img(u_pred.mean(-1)))
+                # u_pred = (u_pred * 255).astype(np.uint8)
+                # imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_u.png'), u_pred)
+
             if self.hparams.mcdropout:
-                u_pred = rearrange(results['uncert'].cpu().numpy(), '(h w) -> h w', h=h)
-                outputs['data']['mcd'] = u_pred
-                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_gt.png'), rgb_gt)
-                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), err2img(err.mean(-1)))
-                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), err2img(u_pred))
+                mcd = rearrange(results['mcd'].cpu().numpy(), '(h w) -> h w', h=h)
+                outputs['data']['mcd'] = mcd
+                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), err2img(mcd))
 
             ########### save outputs ##################
         if self.hparams.save_output:
             idx = batch['img_idxs']
             torch.save(outputs,os.path.join(self.val_dir, f'{idx:03d}.pth'))
 
-        del rgb_gt,rgb_pred,err,depth,results,batch
+        del rgb_gt,rgb_pred,err,depth,results,outputs,batch
 
         return logs
 

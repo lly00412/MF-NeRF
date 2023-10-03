@@ -65,9 +65,7 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
     opacity = torch.zeros(N_rays, device=device)
     depth = torch.zeros(N_rays, device=device)
     rgb = torch.zeros(N_rays, 3, device=device)
-    u_pred = None
-    if kwargs.get('uncert', False):
-        u_pred = torch.zeros(N_rays, 3, device=device)
+    u_pred = torch.zeros(N_rays, 3, device=device)
 
     samples = total_samples = 0
     alive_indices = torch.arange(N_rays, device=device)
@@ -97,7 +95,7 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         sigmas = torch.zeros(len(xyzs), device=device)
         rgbs = torch.zeros(len(xyzs), 3, device=device)
         u_preds = None
-        if kwargs.get('uncert', False):
+        if model.uncert:
             u_preds = torch.zeros(len(xyzs), 3, device=device)
 
         ################# TO SOLVE THE MEMORY PROBLEM #################
@@ -108,7 +106,7 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         sigmas = list(torch.chunk(sigmas,chunks=N_trunks))
         rgbs = list(torch.chunk(rgbs,chunks=N_trunks))
 
-        if kwargs.get('uncert', False):
+        if model.uncert:
             u_preds = list(torch.chunk(u_preds,chunks=N_trunks))
             for t_idx in range(N_trunks):
                 sigmas[t_idx][valid_mask[t_idx]], _rgbs, _u_preds = model(xyzs[t_idx][valid_mask[t_idx]], dirs[t_idx][valid_mask[t_idx]], **kwargs)
@@ -126,7 +124,7 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         rgbs = torch.cat(rgbs)
         sigmas = rearrange(sigmas, '(n1 n2) -> n1 n2', n2=N_samples)
         rgbs = rearrange(rgbs, '(n1 n2) c -> n1 n2 c', n2=N_samples)
-        if kwargs.get('uncert', False):
+        if model.uncert:
             u_preds = torch.cat(u_preds)
             u_preds = rearrange(u_preds, '(n1 n2) c -> n1 n2 c', n2=N_samples)
             vren.composite_test_uncert_fw(
@@ -176,13 +174,15 @@ def __render_rays_train(model, rays_o, rays_d, hits_t, **kwargs):
             rays_o, rays_d, hits_t[:, 0], model.density_bitfield,
             model.cascades, model.scale,
             exp_step_factor, model.grid_size, MAX_SAMPLES)
+    #print(rays_a.size()) # N_rays, 3
+    # ray_idx = rays_a[n][0], start_idx = rays_a[n][1], N_samples = rays_a[n][2];
 
     for k, v in kwargs.items(): # supply additional inputs, repeated per ray
         if isinstance(v, torch.Tensor):
             kwargs[k] = torch.repeat_interleave(v[rays_a[:, 0]], rays_a[:, 2], 0)
     sigmas, rgbs, u_preds = model(xyzs, dirs, **kwargs)
 
-    if kwargs.get('uncert', False):
+    if model.uncert:
         (results['vr_samples'], results['opacity'],
          results['depth'], results['rgb'], results['u_pred'], results['ws']) = \
             VolumeRenderer_with_uncert.apply(sigmas, rgbs.contiguous(), u_preds.contiguous(), results['deltas'], results['ts'],

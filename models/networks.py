@@ -91,15 +91,13 @@ class NGP(nn.Module):
         #     nn.Linear(128, 3,bias=False),
         #     self.rgb_act,
         # )
-        self.fine_net = tcnn.Network(
-                n_input_dims=32, n_output_dims=128,
-                network_config={
-                    "otype": "FullyFusedMLP",
-                    "activation": "ReLU",
-                    "output_activation": "ReLU",
-                    "n_neurons": hparams.rgb_channels,
-                    "n_hidden_layers": hparams.rgb_layers-1,
-                }
+        self.fine_net = torch.nn.Sequential(
+            nn.Linear(32, 128, bias=False),
+                nn.ReLU(),
+                nn.Linear(128, 128,bias=False),
+                nn.ReLU(),
+                nn.Linear(128, 128,bias=False),
+                nn.ReLU(),
             )
         self.rgb_out = torch.nn.Sequential(
             nn.Dropout(p=0),
@@ -110,7 +108,7 @@ class NGP(nn.Module):
             self.uncert_out = torch.nn.Sequential(
                 nn.Dropout(p=0),
                 nn.Linear(128, 3, bias=False),
-                self.rgb_act,
+                nn.ELU(),
             )
 
         if self.rgb_act == 'None': # rgb_net output is log-radiance

@@ -55,15 +55,17 @@ class NeRFLoss(nn.Module):
             d['rgb'] = l2_loss
 
         if self.loss_type=='kg': # always output log_sigma
-            d['rgb'] = l2_loss/torch.exp(results['u_pred'])+0.5*torch.exp(results['u_pred'])
+            # l1_loss = torch.abs(results['u_pred'] - target['rgb'])
+            # d['rgb'] = l2_loss+l1_loss
+            d['rgb'] = ( l2_loss /torch.exp(results['u_pred'])) + results['u_pred']
 
         if self.loss_type=='uc':
-            bins = torch.logspace(0,10.,20)
-            kg_loss = l2_loss/torch.exp(results['u_pred'])+0.5*torch.exp(results['u_pred'])
+            bins = torch.logspace(0,math.log(5),20)
+            kg_loss = ( l2_loss /torch.exp(results['u_pred'])) + results['u_pred']
             rgb_p, u_p = self.soft_assignment(l2_loss.sqrt(),results['u_pred'],bins)
             kl_loss = []
             for i in range(rgb_p.size(-1)):
-                kl_loss.append(F.kl_div(u_p[:,i],rgb_p[:,i], reduction='mean').reshape(1))
+                kl_loss.append(F.kl_div(u_p[:,i],rgb_p[:,i], reduction='sum').reshape(1))
             kl_loss = torch.cat(kl_loss)
             kl_loss = kl_loss[None,:].expand(l2_loss.size(0),-1)
             d['rgb'] = kg_loss+kl_loss

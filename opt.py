@@ -60,7 +60,7 @@ def get_opts():
     parser.add_argument('--loss', type=str, default='l2',
                         choices=['l2', 'kg', 'uc'],
                         help='which loss to train')
-    parser.add_argument('--uncert', type=bool, default=False,
+    parser.add_argument('--uncert', action='store_true', default=False,
                         help='whether to estimate uncertainty')
 
     # validation options
