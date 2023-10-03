@@ -80,7 +80,8 @@ class NeRFSystem(LightningModule):
         rgb_act = 'None' if self.hparams.use_exposure else 'Sigmoid'
         self.model = NGP(scale=self.hparams.scale, 
                             hparams=hparams,
-                            rgb_act=rgb_act)
+                            rgb_act=rgb_act,
+                            uncert=self.hparams.uncert)
         G = self.model.grid_size
         self.model.register_buffer('density_grid',
             torch.zeros(self.model.cascades, G**3))
@@ -103,7 +104,8 @@ class NeRFSystem(LightningModule):
         rays_o, rays_d = get_rays(directions, poses)
 
         kwargs = {'test_time': split!='train',
-                  'random_bg': self.hparams.random_bg}
+                  'random_bg': self.hparams.random_bg,
+                  'uncert':self.hparams.uncert}
         if self.hparams.scale > 0.5:
             kwargs['exp_step_factor'] = 1/256
         if self.hparams.use_exposure:
@@ -247,6 +249,8 @@ class NeRFSystem(LightningModule):
             enable_dropout(self.model.rgb_net,p=self.hparams.p)
             mcd_rgb_preds = []
             print('Start MC-Dropout...')
+
+            #TODO: E[(x-miu)^2] = E[x^2]-miu^2
             for N in trange(self.hparams.n_passes):
                 mcd_results = self(batch,split='test')
                 #mcd_rgb_pred = rearrange(mcd_results['rgb'], '(h w) c -> 1 c h w', h=h) # torch (1,3,h,w)

@@ -55,6 +55,8 @@ def get_opts():
                         help='fewshot_seed')
     parser.add_argument("--fewshot", type=int, default=0,
                         help='if 0 not using fewshot, else: using fewshot')
+    parser.add_argument('--uncert', action='store_true', default=False,
+                        help='whether to plug in uncertainty subnetwork')
 
     # validation options
     parser.add_argument('--eval_lpips', action='store_true', default=False,

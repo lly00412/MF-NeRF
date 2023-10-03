@@ -111,6 +111,53 @@ class RayMarcher(torch.autograd.Function):
 
         return dL_drays_o, dL_drays_d, None, None, None, None, None, None, None
 
+class VolumeRenderer_with_uncert(torch.autograd.Function):
+    """
+    Volume rendering with different number of samples per ray
+    Used in training only
+
+    Inputs:
+        sigmas: (N)
+        rgbs: (N, 3)
+        u_preds: (N, 3)
+        deltas: (N)
+        ts: (N)
+        rays_a: (N_rays, 3) ray_idx, start_idx, N_samples
+                meaning each entry corresponds to the @ray_idx th ray,
+                whose samples are [start_idx:start_idx+N_samples]
+        T_threshold: float, stop the ray if the transmittance is below it
+
+    Outputs:
+        total_samples: int, total effective samples
+        opacity: (N_rays)
+        depth: (N_rays)
+        rgb: (N_rays, 3)
+        u_pred: (N_rays, 3)
+        ws: (N) sample point weights
+    """
+    @staticmethod
+    @custom_fwd(cast_inputs=torch.float32)
+    def forward(ctx, sigmas, rgbs, u_preds, deltas, ts, rays_a, T_threshold):
+        total_samples, opacity, depth, rgb, u_pred, ws = \
+            vren.composite_train_uncert_fw(sigmas, rgbs, u_preds, deltas, ts,
+                                    rays_a, T_threshold)
+        ctx.save_for_backward(sigmas, rgbs, u_preds, deltas, ts, rays_a,
+                              opacity, depth, rgb, u_pred, ws)
+        ctx.T_threshold = T_threshold
+        return total_samples.sum(), opacity, depth, rgb, u_pred, ws
+
+    @staticmethod
+    @custom_bwd
+    def backward(ctx, dL_dtotal_samples, dL_dopacity, dL_ddepth, dL_drgb, dL_du_pred, dL_dws):
+        sigmas, rgbs, u_preds, deltas, ts, rays_a, \
+        opacity, depth, rgb, u_pred, ws = ctx.saved_tensors
+        dL_dsigmas, dL_drgbs, dL_du_preds = \
+            vren.composite_train_uncert_bw(dL_dopacity, dL_ddepth, dL_drgb,dL_du_pred, dL_dws,
+                                    sigmas, rgbs, u_preds, ws, deltas, ts,
+                                    rays_a,
+                                    opacity, depth, rgb, u_pred,
+                                    ctx.T_threshold)
+        return dL_dsigmas, dL_drgbs, dL_du_preds, None, None, None, None
 
 class VolumeRenderer(torch.autograd.Function):
     """

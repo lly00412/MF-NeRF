@@ -19,7 +19,7 @@ python train.py \
     --num_epochs 5 --batch_size 2048 --scale 16.0 --lr 2e-2 --eval_lpips \
     --L 16 --F 2 --T 20 --N_min 16 --grid MixedFeature --N_tables 8 \
     --rgb_channels 128 --rgb_layers 2 \
-    --mcdropout --n_passes 100 --p 0.5 \
+    --mcdropout --n_passes 30 --p 0.5 \
     --val_only --ckpt_path ${CKPT_DIR}/${SCENES}/epoch=9.ckpt \
     --save_output
 done

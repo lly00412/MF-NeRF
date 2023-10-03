@@ -1,6 +1,6 @@
 import torch
 from .custom_functions import \
-    RayAABBIntersector, RayMarcher, VolumeRenderer
+    RayAABBIntersector, RayMarcher, VolumeRenderer, VolumeRenderer_with_uncert
 from einops import rearrange
 import vren
 import numpy as np
@@ -65,6 +65,9 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
     opacity = torch.zeros(N_rays, device=device)
     depth = torch.zeros(N_rays, device=device)
     rgb = torch.zeros(N_rays, 3, device=device)
+    u_pred = None
+    if kwargs.get('uncert', False):
+        u_pred = torch.zeros(N_rays, 3, device=device)
 
     samples = total_samples = 0
     alive_indices = torch.arange(N_rays, device=device)
@@ -79,15 +82,6 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         # the number of samples to add on each ray
         N_samples = max(min(N_rays//N_alive, 64), min_samples)
         samples += N_samples
-        # print('N_rays:{}'.format(N_rays))
-        # print('N_alive:{}'.format(N_alive))
-        # print('N_rays / N_alive: {}'.format(N_rays//N_alive))
-        # print('samples:{}'.format(samples))
-        # print(rays_o.size())
-        # print(rays_d.size())
-        # print(hits_t[:,0].size())
-        # print(alive_indices.size())
-        # print(N_samples)
 
         xyzs, dirs, deltas, ts, N_eff_samples = \
             vren.raymarching_test(rays_o, rays_d, hits_t[:, 0], alive_indices,
@@ -102,6 +96,9 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
 
         sigmas = torch.zeros(len(xyzs), device=device)
         rgbs = torch.zeros(len(xyzs), 3, device=device)
+        u_preds = None
+        if kwargs.get('uncert', False):
+            u_preds = torch.zeros(len(xyzs), 3, device=device)
 
         ################# TO SOLVE THE MEMORY PROBLEM #################
         N_trunks = 4
@@ -111,10 +108,17 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         sigmas = list(torch.chunk(sigmas,chunks=N_trunks))
         rgbs = list(torch.chunk(rgbs,chunks=N_trunks))
 
-        for t_idx in range(N_trunks):
-            sigmas[t_idx][valid_mask[t_idx]], _rgbs = model(xyzs[t_idx][valid_mask[t_idx]], dirs[t_idx][valid_mask[t_idx]], **kwargs)
-            rgbs[t_idx][valid_mask[t_idx]] = _rgbs.float()
-
+        if kwargs.get('uncert', False):
+            u_preds = list(torch.chunk(u_preds,chunks=N_trunks))
+            for t_idx in range(N_trunks):
+                sigmas[t_idx][valid_mask[t_idx]], _rgbs, _u_preds = model(xyzs[t_idx][valid_mask[t_idx]], dirs[t_idx][valid_mask[t_idx]], **kwargs)
+                rgbs[t_idx][valid_mask[t_idx]] = _rgbs.float()
+                u_preds[t_idx][valid_mask[t_idx]] = _u_preds.float()
+        else:
+            for t_idx in range(N_trunks):
+                sigmas[t_idx][valid_mask[t_idx]], _rgbs, _u_preds = model(xyzs[t_idx][valid_mask[t_idx]],
+                                                                          dirs[t_idx][valid_mask[t_idx]], **kwargs)
+                rgbs[t_idx][valid_mask[t_idx]] = _rgbs.float()
 
         #############################################################
 
@@ -122,17 +126,26 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         rgbs = torch.cat(rgbs)
         sigmas = rearrange(sigmas, '(n1 n2) -> n1 n2', n2=N_samples)
         rgbs = rearrange(rgbs, '(n1 n2) c -> n1 n2 c', n2=N_samples)
+        if kwargs.get('uncert', False):
+            u_preds = torch.cat(u_preds)
+            u_preds = rearrange(u_preds, '(n1 n2) c -> n1 n2 c', n2=N_samples)
+            vren.composite_test_uncert_fw(
+                sigmas, rgbs, u_preds,deltas, ts,
+                hits_t[:, 0], alive_indices, kwargs.get('T_threshold', 1e-4),
+                N_eff_samples, opacity, depth, rgb,u_pred)
+        else:
+            vren.composite_test_fw(
+                sigmas, rgbs, deltas, ts,
+                hits_t[:, 0], alive_indices, kwargs.get('T_threshold', 1e-4),
+                N_eff_samples, opacity, depth, rgb)
 
-        vren.composite_test_fw(
-            sigmas, rgbs, deltas, ts,
-            hits_t[:, 0], alive_indices, kwargs.get('T_threshold', 1e-4),
-            N_eff_samples, opacity, depth, rgb)
         alive_indices = alive_indices[alive_indices>=0] # remove converged rays
 
     results['opacity'] = opacity
     results['depth'] = depth
     results['rgb'] = rgb
     results['total_samples'] = total_samples # total samples for all rays
+    results['u_pred'] = u_pred
 
     if exp_step_factor==0: # synthetic
         rgb_bg = torch.ones(3, device=device)
@@ -167,12 +180,18 @@ def __render_rays_train(model, rays_o, rays_d, hits_t, **kwargs):
     for k, v in kwargs.items(): # supply additional inputs, repeated per ray
         if isinstance(v, torch.Tensor):
             kwargs[k] = torch.repeat_interleave(v[rays_a[:, 0]], rays_a[:, 2], 0)
-    sigmas, rgbs = model(xyzs, dirs, **kwargs)
+    sigmas, rgbs, u_preds = model(xyzs, dirs, **kwargs)
 
-    (results['vr_samples'], results['opacity'],
-    results['depth'], results['rgb'], results['ws']) = \
-        VolumeRenderer.apply(sigmas, rgbs.contiguous(), results['deltas'], results['ts'],
-                             rays_a, kwargs.get('T_threshold', 1e-4))
+    if kwargs.get('uncert', False):
+        (results['vr_samples'], results['opacity'],
+         results['depth'], results['rgb'], results['u_pred'], results['ws']) = \
+            VolumeRenderer_with_uncert.apply(sigmas, rgbs.contiguous(), u_preds.contiguous(), results['deltas'], results['ts'],
+                                 rays_a, kwargs.get('T_threshold', 1e-4))
+    else:
+        (results['vr_samples'], results['opacity'],
+         results['depth'], results['rgb'], results['ws']) = \
+            VolumeRenderer.apply(sigmas, rgbs.contiguous(), results['deltas'], results['ts'],
+                                 rays_a, kwargs.get('T_threshold', 1e-4))
     results['rays_a'] = rays_a
 
     if exp_step_factor==0: # synthetic

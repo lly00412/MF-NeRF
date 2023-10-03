@@ -10,7 +10,7 @@ from .rendering import NEAR_DISTANCE
 
 
 class NGP(nn.Module):
-    def __init__(self, scale, hparams, rgb_act='Sigmoid'):
+    def __init__(self, scale, hparams, rgb_act='Sigmoid',uncert=False):
         super().__init__()
 
         if not rgb_act=='None':
@@ -18,6 +18,7 @@ class NGP(nn.Module):
 
         # scene bounding box
         self.scale = scale
+        self.uncert = uncert
         self.register_buffer('center', torch.zeros(1, 3))
         self.register_buffer('xyz_min', -torch.ones(1, 3)*scale)
         self.register_buffer('xyz_max', torch.ones(1, 3)*scale)
@@ -78,18 +79,39 @@ class NGP(nn.Module):
             #         "n_hidden_layers": hparams.rgb_layers,
             #     }
             # )
-        self.rgb_net = torch.nn.Sequential(
-            nn.Linear(32, 128,bias=False),
-            nn.ReLU(),
-            # nn.Dropout(p=0),
-            nn.Linear(128, 128,bias=False),
-            nn.ReLU(),
-            nn.Linear(128, 128,bias=False),
-            nn.ReLU(),
+        # self.rgb_net = torch.nn.Sequential(
+        #     nn.Linear(32, 128,bias=False),
+        #     nn.ReLU(),
+        #     # nn.Dropout(p=0),
+        #     nn.Linear(128, 128,bias=False),
+        #     nn.ReLU(),
+        #     nn.Linear(128, 128,bias=False),
+        #     nn.ReLU(),
+        #     nn.Dropout(p=0),
+        #     nn.Linear(128, 3,bias=False),
+        #     self.rgb_act,
+        # )
+        self.fine_net = tcnn.Network(
+                n_input_dims=32, n_output_dims=128,
+                network_config={
+                    "otype": "FullyFusedMLP",
+                    "activation": "ReLU",
+                    "output_activation": "ReLU",
+                    "n_neurons": hparams.rgb_channels,
+                    "n_hidden_layers": hparams.rgb_layers-1,
+                }
+            )
+        self.rgb_out = torch.nn.Sequential(
             nn.Dropout(p=0),
             nn.Linear(128, 3,bias=False),
             self.rgb_act,
         )
+        if self.uncert:
+            self.uncert_out = torch.nn.Sequential(
+                nn.Dropout(p=0),
+                nn.Linear(128, 3, bias=False),
+                self.rgb_act,
+            )
 
         if self.rgb_act == 'None': # rgb_net output is log-radiance
             for i in range(3): # independent tonemappers for r,g,b
@@ -157,15 +179,27 @@ class NGP(nn.Module):
         sigmas, h = self.density(x, return_feat=True)
         d = d/torch.norm(d, dim=1, keepdim=True)
         d = self.dir_encoder((d+1)/2)
-        rgbs = self.rgb_net(torch.cat([d, h], 1))
+
+        latents = self.fine_net(torch.cat([d, h], 1))
+
+        # rgbs = self.rgb_net(torch.cat([d, h], 1))
+        rgbs = self.rgb_out(latents)
+        u_preds = None
+        if self.uncert:
+            u_preds = self.uncert_out(latents)
 
         if self.rgb_act == 'None': # rgbs is log-radiance
             if kwargs.get('output_radiance', False): # output HDR map
                 rgbs = TruncExp.apply(rgbs)
+                if self.uncert:
+                    u_preds = TruncExp.apply(u_preds)
             else: # convert to LDR using tonemapper networks
                 rgbs = self.log_radiance_to_rgb(rgbs, **kwargs)
+                if self.uncert:
+                    u_preds = self.log_radiance_to_rgb(u_preds, **kwargs)
 
-        return sigmas, rgbs
+        return sigmas, rgbs, u_preds
+
 
     @torch.no_grad()
     def get_all_cells(self):
