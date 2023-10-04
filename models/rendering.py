@@ -175,7 +175,10 @@ def __render_rays_train(model, rays_o, rays_d, hits_t, **kwargs):
             model.cascades, model.scale,
             exp_step_factor, model.grid_size, MAX_SAMPLES)
     #print(rays_a.size()) # N_rays, 3
+    # compute transimision penalty
     # ray_idx = rays_a[n][0], start_idx = rays_a[n][1], N_samples = rays_a[n][2];
+    # occupancy probability = 1.0f - __expf(-sigmas[s]*deltas[s]);
+    # s = start_idx + samples;
 
     for k, v in kwargs.items(): # supply additional inputs, repeated per ray
         if isinstance(v, torch.Tensor):
