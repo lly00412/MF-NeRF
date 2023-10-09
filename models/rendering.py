@@ -197,6 +197,10 @@ def __render_rays_train(model, rays_o, rays_d, hits_t,rays_t, **kwargs):
              VolumeRenderer.apply(static_sigmas, static_rgbs.contiguous(), results['deltas'], results['ts'],
                                   rays_a, kwargs.get('T_threshold', 1e-4))
 
+    if model.output_transient:
+        results['rgb'] = results['static_rgb']+results['transient_rgb']
+    else:
+        results['rgb'] = results['static_rgb']
 
 
     # if model.uncert:
@@ -218,11 +222,7 @@ def __render_rays_train(model, rays_o, rays_d, hits_t,rays_t, **kwargs):
             rgb_bg = torch.rand(3, device=rays_o.device)
         else:
             rgb_bg = torch.zeros(3, device=rays_o.device)
-    results['static_rgb'] = results['static_rgb'] + \
+    results['rgb'] = results['rgb'] + \
                      rgb_bg*rearrange(1-results['opacity'], 'n -> n 1')
-    if model.output_transient:
-        results['rgb'] = results['static_rgb']+results['transient_rgb']
-    else:
-        results['rgb'] = results['static_rgb']
 
     return results
