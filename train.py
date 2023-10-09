@@ -78,13 +78,12 @@ class NeRFSystem(LightningModule):
                 p.requires_grad = False
 
         if self.hparams.loss in ['kg','uc']:
-            self.hparams.uncert = True
+            self.hparams.output_transient = True
 
         rgb_act = 'None' if self.hparams.use_exposure else 'Sigmoid'
         self.model = NGP(scale=self.hparams.scale, 
                             hparams=hparams,
-                            rgb_act=rgb_act,
-                            uncert=self.hparams.uncert)
+                            rgb_act=rgb_act)
         G = self.model.grid_size
         self.model.register_buffer('density_grid',
             torch.zeros(self.model.cascades, G**3))
@@ -105,21 +104,22 @@ class NeRFSystem(LightningModule):
             poses[..., 3] += self.dT[batch['img_idxs']]
 
         rays_o, rays_d = get_rays(directions, poses)
+        rays_t = batch['img_idxs'] * torch.ones(len(rays_o))
 
         kwargs = {'test_time': split!='train',
-                  'random_bg': self.hparams.random_bg,
-                  'uncert':self.hparams.uncert}
+                  'random_bg': self.hparams.random_bg}
         if self.hparams.scale > 0.5:
             kwargs['exp_step_factor'] = 1/256
         if self.hparams.use_exposure:
             kwargs['exposure'] = batch['exposure']
 
-        return render(self.model, rays_o, rays_d, **kwargs)
+        return render(self.model, rays_o, rays_d, rays_t,**kwargs)
 
     def setup(self, stage):
         dataset = dataset_dict[self.hparams.dataset_name]
         kwargs = {'root_dir': self.hparams.root_dir,
                   'downsample': self.hparams.downsample}
+        self.hparams.N_vocab = dataset.N_vocab
         self.train_dataset = dataset(split=self.hparams.split,
                                      fewshot=self.hparams.fewshot,
                                      seed=self.hparams.fewshot_seed,
@@ -287,7 +287,7 @@ class NeRFSystem(LightningModule):
             ########### save uncerts ##################
             if self.hparams.uncert:
                 u_pred = rearrange(results['u_pred'].cpu().numpy(), '(h w) c -> h w c', h=h)
-                outputs['data']['u_pred'] = u_pred
+                outputs['data']['u_pred'] = np.exp(u_pred)
                 imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_u.png'), err2img(u_pred.mean(-1)))
                 # u_pred = (u_pred * 255).astype(np.uint8)
                 # imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_u.png'), u_pred)

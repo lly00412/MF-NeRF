@@ -17,6 +17,7 @@ class NeRFDataset(BaseDataset):
         self.seed = fewshot_seed
 
         self.read_intrinsics()
+        self.N_vocab = 100
 
         if kwargs.get('read_meta', True):
             self.read_meta(split)

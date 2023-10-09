@@ -21,6 +21,22 @@ def get_opts():
     parser.add_argument('--use_exposure', action='store_true', default=False,
                         help='whether to train in HDR-NeRF setting')
 
+    # NeRF-W parameters
+    parser.add_argument('--N_vocab', type=int, default=100,
+                        help='''number of vocabulary (number of images) 
+                                   in the dataset for nn.Embedding''')
+    parser.add_argument('--encode_a', default=False, action="store_true",
+                        help='whether to encode appearance (NeRF-A)')
+    parser.add_argument('--N_a', type=int, default=48,
+                        help='number of embeddings for appearance')
+    parser.add_argument('--encode_t', default=False, action="store_true",
+                        help='whether to encode transient object (NeRF-U)')
+    parser.add_argument('--N_tau', type=int, default=16,
+                        help='number of embeddings for transient objects')
+    parser.add_argument('--beta_min', type=float, default=0.1,
+                        help='minimum color variance for each ray')
+
+
     # loss parameters
     parser.add_argument('--distortion_loss_w', type=float, default=0,
                         help='''weight of distortion loss (see losses.py),
@@ -60,7 +76,7 @@ def get_opts():
     parser.add_argument('--loss', type=str, default='l2',
                         choices=['l2', 'kg', 'uc'],
                         help='which loss to train')
-    parser.add_argument('--uncert', action='store_true', default=False,
+    parser.add_argument('--output_transient', action='store_true', default=False,
                         help='whether to estimate uncertainty')
 
     # validation options

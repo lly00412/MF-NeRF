@@ -57,7 +57,10 @@ class NeRFLoss(nn.Module):
         if self.loss_type=='kg': # always output log_sigma
             # l1_loss = torch.abs(results['u_pred'] - target['rgb'])
             # d['rgb'] = l2_loss+l1_loss
-            d['rgb'] = ( l2_loss /torch.exp(results['u_pred'])) + results['u_pred']
+            # o = results['opacity'] + 1e-10
+            # d['rgb'] = l2_loss
+            # d['rgb'][o>=0.5] = ( l2_loss[o>=0.5] /torch.exp(results['u_pred'][o>=0.5])) + results['u_pred'][o>=0.5]
+            d['rgb'] = (l2_loss/ torch.exp(results['u_pred'])) + results['u_pred']
 
         if self.loss_type=='uc':
             bins = torch.logspace(0,math.log(5),20)
@@ -71,8 +74,10 @@ class NeRFLoss(nn.Module):
             d['rgb'] = kg_loss+kl_loss
 
         o = results['opacity']+1e-10
-        # encourage opacity to be either 0 or 1 to avoid floater
+        # # encourage opacity to be either 0 or 1 to avoid floater
         d['opacity'] = self.lambda_opacity*(-o*torch.log(o))
+        #
+        # d['density'] = (1-d['opacity'])**2
 
         if self.lambda_distortion > 0:
             d['distortion'] = self.lambda_distortion * \
