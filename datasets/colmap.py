@@ -59,6 +59,7 @@ class ColmapDataset(BaseDataset):
         # read successfully reconstructed images and ignore others
         img_paths = [os.path.join(self.root_dir, folder, name)
                      for name in sorted(img_names)]
+        self.N_vocab = len(img_paths)
         w2c_mats = []
         bottom = np.array([[0, 0, 0, 1.]])
         for k in imdata:

@@ -9,7 +9,7 @@ NEAR_DISTANCE = 0.01
 
 
 @torch.cuda.amp.autocast()
-def render(model, rays_o, rays_d, **kwargs):
+def render(model, rays_o, rays_d, rays_t, **kwargs):
     """
     Render rays by
     1. Compute the intersection of the rays with the scene bounding box
@@ -19,11 +19,12 @@ def render(model, rays_o, rays_d, **kwargs):
         model: NGP
         rays_o: (N_rays, 3) ray origins
         rays_d: (N_rays, 3) ray directions
+        rays_t: (N_rays), ray time as embedding index
 
     Outputs:
         result: dictionary containing final rgb and depth
     """
-    rays_o = rays_o.contiguous(); rays_d = rays_d.contiguous()
+    rays_o = rays_o.contiguous(); rays_d = rays_d.contiguous(); rays_t = rays_t.long()
     _, hits_t, _ = \
         RayAABBIntersector.apply(rays_o, rays_d, model.center, model.half_size, 1)
     hits_t[(hits_t[:, 0, 0]>=0)&(hits_t[:, 0, 0]<NEAR_DISTANCE), 0, 0] = NEAR_DISTANCE
@@ -33,7 +34,7 @@ def render(model, rays_o, rays_d, **kwargs):
     else:
         render_func = __render_rays_train
 
-    results = render_func(model, rays_o, rays_d, hits_t, **kwargs)
+    results = render_func(model, rays_o, rays_d, hits_t,rays_t, **kwargs)
     for k, v in results.items():
         if kwargs.get('to_cpu', False):
             v = v.cpu()
@@ -44,7 +45,7 @@ def render(model, rays_o, rays_d, **kwargs):
 
 
 @torch.no_grad()
-def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
+def __render_rays_test(model, rays_o, rays_d, hits_t, rays_t, **kwargs):
     """
     Render rays by
 
@@ -153,8 +154,9 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
 
     return results
 
+occupancy_prob  = lambda x,y : 1.0 - torch.exp(-x * y)
 
-def __render_rays_train(model, rays_o, rays_d, hits_t, **kwargs):
+def __render_rays_train(model, rays_o, rays_d, hits_t,rays_t, **kwargs):
     """
     Render rays by
     1. March the rays along their directions, querying @density_bitfield
@@ -168,6 +170,13 @@ def __render_rays_train(model, rays_o, rays_d, hits_t, **kwargs):
     exp_step_factor = kwargs.get('exp_step_factor', 0.)
     results = {}
 
+
+    if 'a_embedded' not in kwargs.keys():
+        kwargs['a_embedded']= model.embedding_a(rays_t)
+    if model.output_transient:
+        if 't_embedded' not in kwargs.keys():
+            kwargs['t_embedded'] = model.embedding_t(rays_t)
+
     (rays_a, xyzs, dirs,
     results['deltas'], results['ts'], results['rm_samples']) = \
         RayMarcher.apply(
@@ -175,26 +184,35 @@ def __render_rays_train(model, rays_o, rays_d, hits_t, **kwargs):
             model.cascades, model.scale,
             exp_step_factor, model.grid_size, MAX_SAMPLES)
     #print(rays_a.size()) # N_rays, 3
-    # compute transimision penalty
-    # ray_idx = rays_a[n][0], start_idx = rays_a[n][1], N_samples = rays_a[n][2];
-    # occupancy probability = 1.0f - __expf(-sigmas[s]*deltas[s]);
-    # s = start_idx + samples;
 
     for k, v in kwargs.items(): # supply additional inputs, repeated per ray
         if isinstance(v, torch.Tensor):
             kwargs[k] = torch.repeat_interleave(v[rays_a[:, 0]], rays_a[:, 2], 0)
-    sigmas, rgbs, u_preds = model(xyzs, dirs, **kwargs)
+    # sigmas, rgbs, u_preds = model(xyzs, dirs, a_embedded,t_embedded, **kwargs)
 
-    if model.uncert:
-        (results['vr_samples'], results['opacity'],
-         results['depth'], results['rgb'], results['u_pred'], results['ws']) = \
-            VolumeRenderer_with_uncert.apply(sigmas, rgbs.contiguous(), u_preds.contiguous(), results['deltas'], results['ts'],
-                                 rays_a, kwargs.get('T_threshold', 1e-4))
+    static_sigmas, static_rgbs, transient_sigmas, transient_rgbs, transient_betas = model(xyzs, dirs, **kwargs)
+
+    (results['vr_samples'], results['opacity'],
+          results['depth'], results['rgb'], results['ws']) = \
+             VolumeRenderer.apply(static_sigmas, static_rgbs.contiguous(), results['deltas'], results['ts'],
+                                  rays_a, kwargs.get('T_threshold', 1e-4))
+
+    if model.output_transient:
+        results['rgb'] = results['static_rgb']+results['transient_rgb']
     else:
-        (results['vr_samples'], results['opacity'],
-         results['depth'], results['rgb'], results['ws']) = \
-            VolumeRenderer.apply(sigmas, rgbs.contiguous(), results['deltas'], results['ts'],
-                                 rays_a, kwargs.get('T_threshold', 1e-4))
+        results['rgb'] = results['static_rgb']
+
+
+    # if model.uncert:
+    #     (results['vr_samples'], results['opacity'],
+    #      results['depth'], results['rgb'], results['u_pred'], results['ws']) = \
+    #         VolumeRenderer_with_uncert.apply(sigmas, rgbs.contiguous(), u_preds.contiguous(), results['deltas'], results['ts'],
+    #                              rays_a, kwargs.get('T_threshold', 1e-4))
+    # else:
+    #     (results['vr_samples'], results['opacity'],
+    #      results['depth'], results['rgb'], results['ws']) = \
+    #         VolumeRenderer.apply(sigmas, rgbs.contiguous(), results['deltas'], results['ts'],
+    #                              rays_a, kwargs.get('T_threshold', 1e-4))
     results['rays_a'] = rays_a
 
     if exp_step_factor==0: # synthetic

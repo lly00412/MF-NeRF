@@ -14,7 +14,7 @@ do
   python train.py \
     --root_dir ${ROOT_DIR}/${SCENES} \
     --dataset_name colmap \
-    --exp_name nerf_llff/mfgrid_T20_levels_16_F_2_tables_8_rgb_2ly_128ch/${losses}/fewshot/${SCENES}/ \
+    --exp_name nerf_llff/mfgrid_T20_levels_16_F_2_tables_8_rgb_2ly_128ch/${losses}/fewshot/${SCENES}2/ \
     --num_epochs 10 --batch_size 2048 --scale 16.0 --lr 2e-2 --eval_lpips \
     --L 16 --F 2 --T 20 --N_min 16 --grid MixedFeature --N_tables 8 \
     --rgb_channels 128 --rgb_layers 2 \
