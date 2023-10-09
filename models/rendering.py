@@ -170,16 +170,12 @@ def __render_rays_train(model, rays_o, rays_d, hits_t,rays_t, **kwargs):
     exp_step_factor = kwargs.get('exp_step_factor', 0.)
     results = {}
 
-    if model.encode_appearance:
-        if 'a_embedded' in kwargs:
-            a_embedded = kwargs['a_embedded']
-        else:
-            a_embedded = model.embedding_a(rays_t)
+
+    if 'a_embedded' not in kwargs.keys():
+        kwargs['a_embedded']= model.embedding_a(rays_t)
     if model.output_transient:
-        if 't_embedded' in kwargs:
-            t_embedded = kwargs['t_embedded']
-        else:
-            t_embedded = model.embedding_t(rays_t)
+        if 't_embedded' not in kwargs.keys():
+            kwargs['t_embedded'] = model.embedding_t(rays_t)
 
     (rays_a, xyzs, dirs,
     results['deltas'], results['ts'], results['rm_samples']) = \
@@ -194,7 +190,7 @@ def __render_rays_train(model, rays_o, rays_d, hits_t,rays_t, **kwargs):
             kwargs[k] = torch.repeat_interleave(v[rays_a[:, 0]], rays_a[:, 2], 0)
     # sigmas, rgbs, u_preds = model(xyzs, dirs, a_embedded,t_embedded, **kwargs)
 
-    static_sigmas, static_rgbs, transient_sigmas, transient_rgbs, transient_betas = model(xyzs, dirs, a_embedded,t_embedded, **kwargs)
+    static_sigmas, static_rgbs, transient_sigmas, transient_rgbs, transient_betas = model(xyzs, dirs, **kwargs)
 
     (results['vr_samples'], results['opacity'],
           results['depth'], results['rgb'], results['ws']) = \

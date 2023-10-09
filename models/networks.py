@@ -175,7 +175,7 @@ class NGP(nn.Module):
         rgbs = torch.cat(out, 1)
         return rgbs
 
-    def forward(self, x, d, a, t, **kwargs):
+    def forward(self, x, d,  **kwargs):
         """
         Inputs:
             x: (N, 3) xyz in [-scale, scale]
@@ -188,17 +188,18 @@ class NGP(nn.Module):
             rgbs: (N, 3)
 
         """
-
         # static network
         static_sigmas, h = self.density(x, return_feat=True)  # h (N,16)
         d = d/torch.norm(d, dim=1, keepdim=True)
         d = self.dir_encoder((d+1)/2) # (N,16)
         if self.encode_appearance:
+            a = kwargs['a_embedded']
             d = self.dir_a_encoder(torch.cat([d,a],1))
         static_rgbs = self.static_rgb_net(torch.cat([d, h], 1))
 
         # transient network
         if self.output_transient:
+            t = kwargs['t_embedded']
             if self.encode_transient:
                 transient_encoding_input = torch.cat([t, h], 1)
                 t = self.transient_encoding(transient_encoding_input)
