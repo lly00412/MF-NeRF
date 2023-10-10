@@ -77,7 +77,7 @@ class NeRFSystem(LightningModule):
             for p in self.val_lpips.net.parameters():
                 p.requires_grad = False
 
-        if self.hparams.loss in ['kg','uc']:
+        if self.hparams.loss in ['nll','nllc']:
             self.hparams.output_transient = True
 
         rgb_act = 'None' if self.hparams.use_exposure else 'Sigmoid'
@@ -284,13 +284,11 @@ class NeRFSystem(LightningModule):
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_gt.png'), rgb_gt)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), err2img(err.mean(-1)))
 
-            ########### save uncerts ##################
-            if self.hparams.uncert:
-                u_pred = rearrange(results['u_pred'].cpu().numpy(), '(h w) c -> h w c', h=h)
-                outputs['data']['u_pred'] = np.exp(u_pred)
-                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_u.png'), err2img(u_pred.mean(-1)))
-                # u_pred = (u_pred * 255).astype(np.uint8)
-                # imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_u.png'), u_pred)
+            ########### save output_transient ##################
+            if self.hparams.output_transient:
+                beta = rearrange(results['beta'].cpu().numpy(), '(h w) -> h w ', h=h)
+                outputs['data']['beta'] = np.exp(beta)
+                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_b.png'), err2img(beta))
 
             if self.hparams.mcdropout:
                 mcd = rearrange(results['mcd'].cpu().numpy(), '(h w) -> h w', h=h)

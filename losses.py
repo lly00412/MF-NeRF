@@ -40,12 +40,13 @@ class DistortionLoss(torch.autograd.Function):
 
 
 class NeRFLoss(nn.Module):
-    def __init__(self, lambda_opacity=1e-3, lambda_distortion=1e-3,loss_type='l2'):
+    def __init__(self, lambda_opacity=1e-3, lambda_distortion=1e-3,lambda_u=0.01,loss_type='l2'):
         super().__init__()
 
         self.lambda_opacity = lambda_opacity
         self.lambda_distortion = lambda_distortion
         self.loss_type = loss_type
+        self.lamda_u = lambda_u
 
     def forward(self, results, target, **kwargs):
         d = {}
@@ -54,24 +55,21 @@ class NeRFLoss(nn.Module):
         if self.loss_type=='l2':
             d['rgb'] = l2_loss
 
-        if self.loss_type=='kg': # always output log_sigma
-            # l1_loss = torch.abs(results['u_pred'] - target['rgb'])
-            # d['rgb'] = l2_loss+l1_loss
-            # o = results['opacity'] + 1e-10
-            # d['rgb'] = l2_loss
-            # d['rgb'][o>=0.5] = ( l2_loss[o>=0.5] /torch.exp(results['u_pred'][o>=0.5])) + results['u_pred'][o>=0.5]
-            d['rgb'] = (l2_loss/ torch.exp(results['u_pred'])) + results['u_pred']
+        if self.loss_type=='nll': # always output log_sigma
+            d['rgb'] = (l2_loss / (2 * results['beta'].unsqueeze(1) ** 2)) + torch.log(results['beta'])
+            d['t_sigmas'] = self.lambda_u * results['transient_sigmas']
 
-        if self.loss_type=='uc':
+        if self.loss_type=='nllc':
             bins = torch.logspace(0,math.log(5),20)
-            kg_loss = ( l2_loss /torch.exp(results['u_pred'])) + results['u_pred']
-            rgb_p, u_p = self.soft_assignment(l2_loss.sqrt(),results['u_pred'],bins)
+            nll_loss = (l2_loss / (2 * results['beta'].unsqueeze(1) ** 2)) + torch.log(results['beta'])
+            rgb_p, b_p = self.soft_assignment(l2_loss.sqrt(),results['beta'],bins)
             kl_loss = []
             for i in range(rgb_p.size(-1)):
-                kl_loss.append(F.kl_div(u_p[:,i],rgb_p[:,i], reduction='sum').reshape(1))
+                kl_loss.append(F.kl_div(b_p[:,i],rgb_p[:,i], reduction='sum').reshape(1))
             kl_loss = torch.cat(kl_loss)
             kl_loss = kl_loss[None,:].expand(l2_loss.size(0),-1)
-            d['rgb'] = kg_loss+kl_loss
+            d['rgb'] = nll_loss+kl_loss
+            d['t_sigmas'] = self.lambda_u * results['transient_sigmas']
 
         o = results['opacity']+1e-10
         # # encourage opacity to be either 0 or 1 to avoid floater

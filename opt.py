@@ -74,8 +74,8 @@ def get_opts():
 
     # loss options
     parser.add_argument('--loss', type=str, default='l2',
-                        choices=['l2', 'kg', 'uc'],
-                        help='which loss to train')
+                        choices=['l2', 'nll', 'nllc'],
+                        help='which loss to train: l2, nagtive loglikihood, nagtive loglikelihood + consistency (by SEDNet)')
     parser.add_argument('--output_transient', action='store_true', default=False,
                         help='whether to estimate uncertainty')
 
