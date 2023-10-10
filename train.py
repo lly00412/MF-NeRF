@@ -104,7 +104,7 @@ class NeRFSystem(LightningModule):
             poses[..., 3] += self.dT[batch['img_idxs']]
 
         rays_o, rays_d = get_rays(directions, poses)
-        rays_t = batch['img_idxs'] * torch.ones(len(rays_o))
+        rays_t = batch['img_idxs'] * torch.ones(len(rays_o)).to(batch['img_idxs'].device)
 
         kwargs = {'test_time': split!='train',
                   'random_bg': self.hparams.random_bg}
@@ -119,7 +119,6 @@ class NeRFSystem(LightningModule):
         dataset = dataset_dict[self.hparams.dataset_name]
         kwargs = {'root_dir': self.hparams.root_dir,
                   'downsample': self.hparams.downsample}
-        self.hparams.N_vocab = dataset.N_vocab
         self.train_dataset = dataset(split=self.hparams.split,
                                      fewshot=self.hparams.fewshot,
                                      seed=self.hparams.fewshot_seed,
@@ -128,6 +127,7 @@ class NeRFSystem(LightningModule):
         self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
 
         self.test_dataset = dataset(split='test', **kwargs)
+        self.hparams.N_vocab = self.train_dataset.N_vocab + self.test_dataset.N_vocab
 
     def configure_optimizers(self):
         # define additional parameters
