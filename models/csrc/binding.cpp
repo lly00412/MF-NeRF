@@ -125,27 +125,30 @@ std::vector<torch::Tensor> composite_train_fw(
                 rays_a, opacity_threshold);
 }
 
-std::vector<torch::Tensor> composite_train_uncert_fw(
-    const torch::Tensor sigmas,
-    const torch::Tensor rgbs,
-    const torch::Tensor u_preds,
+std::vector<torch::Tensor> composite_train_transient_fw(
+    const torch::Tensor static_sigmas,
+    const torch::Tensor static_rgbs,
+    const torch::Tensor transient_sigmas,
+    const torch::Tensor transient_rgbs,
+    const torch::Tensor transient_betas,
     const torch::Tensor deltas,
     const torch::Tensor ts,
     const torch::Tensor rays_a,
     const float opacity_threshold
 ){
-    CHECK_INPUT(sigmas);
-    CHECK_INPUT(rgbs);
-    CHECK_INPUT(u_preds);
+    CHECK_INPUT(static_sigmas);
+    CHECK_INPUT(static_rgbs);
+    CHECK_INPUT(transient_sigmas);
+    CHECK_INPUT(transient_rgbs);
+    CHECK_INPUT(transient_betas);
     CHECK_INPUT(deltas);
     CHECK_INPUT(ts);
     CHECK_INPUT(rays_a);
 
-    return composite_train_uncert_fw_cu(
-                sigmas, rgbs, u_preds, deltas, ts,
+    return composite_train_transient_fw_cu(
+                static_sigmas, static_rgbs, transient_sigmas, transient_rgbs, transient_betas, deltas, ts,
                 rays_a, opacity_threshold);
 }
-
 
 std::vector<torch::Tensor> composite_train_bw(
     const torch::Tensor dL_dopacity,
@@ -183,48 +186,64 @@ std::vector<torch::Tensor> composite_train_bw(
                 opacity, depth, rgb, opacity_threshold);
 }
 
-
-std::vector<torch::Tensor> composite_train_uncert_bw(
+std::vector<torch::Tensor> composite_train_transient_bw(
     const torch::Tensor dL_dopacity,
     const torch::Tensor dL_ddepth,
-    const torch::Tensor dL_drgb,
-    const torch::Tensor dL_du_pred,
+    const torch::Tensor dL_dstatic_rgb,
+    const torch::Tensor dL_dtransient_rgb,
+    const torch::Tensor dL_dtransient_beta,
     const torch::Tensor dL_dws,
-    const torch::Tensor sigmas,
-    const torch::Tensor rgbs,
-    const torch::Tensor u_preds,
+    const torch::Tensor dL_dstatic_ws,
+    const torch::Tensor dL_dtransient_ws,
+    const torch::Tensor static_sigmas,
+    const torch::Tensor static_rgbs,
+    const torch::Tensor transient_sigmas,
+    const torch::Tensor transient_rgbs,
+    const torch::Tensor transient_betas,
     const torch::Tensor ws,
+    const torch::Tensor static_ws,
+    const torch::Tensor transient_ws,
     const torch::Tensor deltas,
     const torch::Tensor ts,
     const torch::Tensor rays_a,
     const torch::Tensor opacity,
     const torch::Tensor depth,
-    const torch::Tensor rgb,
-    const torch::Tensor u_pred,
+    const torch::Tensor static_rgb,
+    const torch::Tensor transient_rgb,
+    const torch::Tensor transient_beta,
     const float opacity_threshold
 ){
     CHECK_INPUT(dL_dopacity);
     CHECK_INPUT(dL_ddepth);
-    CHECK_INPUT(dL_drgb);
+    CHECK_INPUT(dL_dstatic_rgb);
+    CHECK_INPUT(dL_dtransient_rgb);
+    CHECK_INPUT(dL_dtransient_beta);
     CHECK_INPUT(dL_dws);
-    CHECK_INPUT(sigmas);
-    CHECK_INPUT(rgbs);
-    CHECK_INPUT(u_preds);
+    CHECK_INPUT(dL_dstatic_ws);
+    CHECK_INPUT(dL_dtransient_ws);
+    CHECK_INPUT(static_sigmas);
+    CHECK_INPUT(static_rgbs);
+    CHECK_INPUT(transient_sigmas);
+    CHECK_INPUT(transient_rgbs);
     CHECK_INPUT(ws);
+    CHECK_INPUT(static_ws);
+    CHECK_INPUT(transient_ws);
     CHECK_INPUT(deltas);
     CHECK_INPUT(ts);
     CHECK_INPUT(rays_a);
     CHECK_INPUT(opacity);
     CHECK_INPUT(depth);
-    CHECK_INPUT(rgb);
-    CHECK_INPUT(u_pred);
+    CHECK_INPUT(static_rgb);
+    CHECK_INPUT(transient_rgb);
+    CHECK_INPUT(transient_beta);
 
-    return composite_train_uncert_bw_cu(
-                dL_dopacity, dL_ddepth, dL_drgb, dL_du_pred, dL_dws,
-                sigmas, rgbs, u_preds, ws, deltas, ts, rays_a,
-                opacity, depth, rgb, u_pred, opacity_threshold);
+    return composite_train_transient_bw_cu(
+                dL_dopacity, dL_ddepth, dL_dstatic_rgb, dL_dtransient_rgb, dL_dtransient_beta,
+                dL_dws,dL_dstatic_ws, dL_dtransient_ws,
+                static_sigmas, static_rgbs, transient_sigmas, transient_rgbs, transient_betas,
+                ws, static_ws, transient_ws, deltas, ts, rays_a,
+                opacity, depth, static_rgb, transient_rgb, transient_beta, opacity_threshold);
 }
-
 
 void composite_test_fw(
     const torch::Tensor sigmas,
@@ -256,10 +275,12 @@ void composite_test_fw(
         opacity, depth, rgb);
 }
 
-void composite_test_uncert_fw(
-    const torch::Tensor sigmas,
-    const torch::Tensor rgbs,
-    const torch::Tensor u_preds,
+void composite_test_transient_fw(
+    const torch::Tensor static_sigmas,
+    const torch::Tensor static_rgbs,
+    const torch::Tensor transient_sigmas,
+    const torch::Tensor transient_rgbs,
+    const torch::Tensor transient_betas,
     const torch::Tensor deltas,
     const torch::Tensor ts,
     const torch::Tensor hits_t,
@@ -268,12 +289,15 @@ void composite_test_uncert_fw(
     const torch::Tensor N_eff_samples,
     torch::Tensor opacity,
     torch::Tensor depth,
-    torch::Tensor rgb,
-    torch::Tensor u_pred
+    torch::Tensor static_rgb,
+    torch::Tensor transient_rgb,
+    torch::Tensor transient_beta
 ){
-    CHECK_INPUT(sigmas);
-    CHECK_INPUT(rgbs);
-    CHECK_INPUT(u_preds);
+    CHECK_INPUT(static_sigmas);
+    CHECK_INPUT(static_rgbs);
+    CHECK_INPUT(transient_sigmas);
+    CHECK_INPUT(transient_rgbs);
+    CHECK_INPUT(transient_betas);
     CHECK_INPUT(deltas);
     CHECK_INPUT(ts);
     CHECK_INPUT(hits_t);
@@ -281,13 +305,16 @@ void composite_test_uncert_fw(
     CHECK_INPUT(N_eff_samples);
     CHECK_INPUT(opacity);
     CHECK_INPUT(depth);
-    CHECK_INPUT(rgb);
-    CHECK_INPUT(u_pred);
+    CHECK_INPUT(static_rgb);
+    CHECK_INPUT(transient_rgb);
+    CHECK_INPUT(transient_beta);
 
-    composite_test_uncert_fw_cu(
-        sigmas, rgbs, u_preds,deltas, ts, hits_t, alive_indices,
+    composite_test_transient_fw_cu(
+        static_sigmas, static_rgbs,
+        transient_sigmas, transient_rgbs, transient_betas,
+        deltas, ts, hits_t, alive_indices,
         T_threshold, N_eff_samples,
-        opacity, depth, rgb, u_pred);
+        opacity, depth, static_rgb, transient_rgb, transient_beta);
 }
 
 
@@ -342,11 +369,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m){
     m.def("composite_train_fw", &composite_train_fw);
     m.def("composite_train_bw", &composite_train_bw);
 
-    m.def("composite_train_uncert_fw", &composite_train_uncert_fw);
-    m.def("composite_train_uncert_bw", &composite_train_uncert_bw);
+    m.def("composite_train_transient_fw", &composite_train_transient_fw);
+    m.def("composite_train_transient_bw", &composite_train_transient_bw);
 
     m.def("composite_test_fw", &composite_test_fw);
-    m.def("composite_test_uncert_fw", &composite_test_uncert_fw);
+    m.def("composite_test_transient_fw", &composite_test_transient_fw);
 
     m.def("distortion_loss_fw", &distortion_loss_fw);
     m.def("distortion_loss_bw", &distortion_loss_bw);

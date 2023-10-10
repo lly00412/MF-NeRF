@@ -111,15 +111,17 @@ class RayMarcher(torch.autograd.Function):
 
         return dL_drays_o, dL_drays_d, None, None, None, None, None, None, None
 
-class VolumeRenderer_with_uncert(torch.autograd.Function):
+class VolumeRenderer_with_transient(torch.autograd.Function):
     """
     Volume rendering with different number of samples per ray
     Used in training only
 
     Inputs:
-        sigmas: (N)
-        rgbs: (N, 3)
-        u_preds: (N, 3)
+        static_sigmas: (N)
+        static_rgbs: (N, 3)
+        transient_sigmas: (N)
+        transient_rgbs: (N, 3)
+        transient_betas: (N, 3)
         deltas: (N)
         ts: (N)
         rays_a: (N_rays, 3) ray_idx, start_idx, N_samples
@@ -131,13 +133,16 @@ class VolumeRenderer_with_uncert(torch.autograd.Function):
         total_samples: int, total effective samples
         opacity: (N_rays)
         depth: (N_rays)
-        rgb: (N_rays, 3)
-        u_pred: (N_rays, 3)
+        static_rgb: (N_rays, 3)
+        transient_rgb: (N_rays, 3)
+        transient_beta: (N_rays)
         ws: (N) sample point weights
+        static_ws: (N) sample point weights
+        transient_ws: (N) sample point weights
     """
     @staticmethod
     @custom_fwd(cast_inputs=torch.float32)
-    def forward(ctx, sigmas, rgbs, u_preds, deltas, ts, rays_a, T_threshold):
+    def forward(ctx, static_sigmas, static_rgbs, transient_sigmas,transient_rgbs,transient_betas, deltas, ts, rays_a, T_threshold):
         total_samples, opacity, depth, rgb, u_pred, ws = \
             vren.composite_train_uncert_fw(sigmas, rgbs, u_preds, deltas, ts,
                                     rays_a, T_threshold)

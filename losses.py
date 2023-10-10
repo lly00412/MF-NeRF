@@ -46,7 +46,7 @@ class NeRFLoss(nn.Module):
         self.lambda_opacity = lambda_opacity
         self.lambda_distortion = lambda_distortion
         self.loss_type = loss_type
-        self.lamda_u = lambda_u
+        self.lambda_u = lambda_u
 
     def forward(self, results, target, **kwargs):
         d = {}
@@ -56,18 +56,21 @@ class NeRFLoss(nn.Module):
             d['rgb'] = l2_loss
 
         if self.loss_type=='nll': # always output log_sigma
-            d['rgb'] = (l2_loss / (2 * results['beta'].unsqueeze(1) ** 2)) + torch.log(results['beta'])
+            l2_loss = l2_loss.mean(-1)
+            d['rgb'] = (l2_loss / (2 * results['beta'] ** 2)) + torch.log(results['beta'])
             d['t_sigmas'] = self.lambda_u * results['transient_sigmas']
 
         if self.loss_type=='nllc':
+            l2_loss = l2_loss.mean(-1)
             bins = torch.logspace(0,math.log(5),20)
-            nll_loss = (l2_loss / (2 * results['beta'].unsqueeze(1) ** 2)) + torch.log(results['beta'])
-            rgb_p, b_p = self.soft_assignment(l2_loss.sqrt(),results['beta'],bins)
-            kl_loss = []
-            for i in range(rgb_p.size(-1)):
-                kl_loss.append(F.kl_div(b_p[:,i],rgb_p[:,i], reduction='sum').reshape(1))
-            kl_loss = torch.cat(kl_loss)
-            kl_loss = kl_loss[None,:].expand(l2_loss.size(0),-1)
+            nll_loss = (l2_loss.mean(-1) / (2 * results['beta'] ** 2)) + torch.log(results['beta'])
+            rgb_p, beta_p = self.soft_assignment(l2_loss.sqrt(),results['beta'],bins)
+            # kl_loss = []
+            # for i in range(rgb_p.size(-1)):
+            #     kl_loss.append(F.kl_div(b_p[:,i],rgb_p[:,i], reduction='sum').reshape(1))
+            # kl_loss = torch.cat(kl_loss)
+            # kl_loss = kl_loss[None,:].expand(l2_loss.size(0),-1)
+            kl_loss = F.kl_div(beta_p.log(),rgb_p, reduction='sum')
             d['rgb'] = nll_loss+kl_loss
             d['t_sigmas'] = self.lambda_u * results['transient_sigmas']
 
@@ -84,26 +87,46 @@ class NeRFLoss(nn.Module):
 
         return d
 
-    def soft_assignment(self, gt, est, bin_weights):
-        # gt, est: (N_rays, 3)
+    # def soft_assignment(self, gt, est, bin_weights):
+    #     # gt, est: (N_rays, )
+    #     # bin_weights: (N_bins) in logspace
+    #     N_rays, N_channels = gt.size()
+    #     N_bins = bin_weights.size(0)
+    #     bin_weights = bin_weights.to(gt.device)
+    #
+    #     miu = gt.mean(0).expand(N_bins, -1)  # (Nbins,3)
+    #     sigma = gt.std(0).expand(N_bins, -1)  # (Nbins,3)
+    #
+    #     gt_hat = miu + bin_weights[:, None].expand(-1, N_channels) * sigma  # (N_bins,3)
+    #     gt_hat = gt_hat.expand(N_rays, -1, -1)  # (N_rays,N_bins,N_channels)
+    #
+    #     gt = gt[:, None, :].expand(-1, N_bins, -1)
+    #     gt_dist = 10 * torch.exp(-(gt_hat - gt) ** 2 / 5)  # (N_rays,N_bins,N_channels)
+    #     gt_p = F.softmax(gt_dist, dim=1)  # (N_rays,N_bins,N_channels)
+    #     gt_p = torch.sum(gt_p, dim=0) / N_rays  # # (N_rays,N_channels)
+    #
+    #     est = est[:, None, :].expand(-1, N_bins, -1)
+    #     est_dist = 10 * torch.exp(-(gt_hat - est) ** 2 / 5)
+    #     est_p = F.softmax(est_dist, dim=1)
+    #     est_p = torch.sum(est_p, dim=0) / N_rays
+    #     return gt_p, est_p
+
+    def soft_assignment(self, x, y, bin_weights):
+        # gt, est: (N_rays, )
         # bin_weights: (N_bins) in logspace
-        N_rays, N_channels = gt.size()
-        N_bins = bin_weights.size(0)
-        bin_weights = bin_weights.to(gt.device)
+        bin_weights = bin_weights.to(x.device)
 
-        miu = gt.mean(0).expand(N_bins, -1)  # (Nbins,3)
-        sigma = gt.std(0).expand(N_bins, -1)  # (Nbins,3)
+        miu = x.mean()
+        sigma = x.std()
+        x_hat = miu + bin_weights * sigma
+        x_hat = x_hat.repeat(x.size(0), 1)
+        x = x[:, None]
+        y = y[:, None]
+        x_dist = 10 * torch.exp(-(x_hat - x) ** 2 / 5)
+        x_p = F.softmax(x_dist, dim=1)
+        x_p = torch.sum(x_p, dim=0) / len(x)
+        y_dist = 10 * torch.exp(-(x_hat - y) ** 2 / 5)
+        y_p = F.softmax(y_dist, dim=1)
+        y_p = torch.sum(y_p, dim=0) / len(x)
+        return x_p, y_p
 
-        gt_hat = miu + bin_weights[:, None].expand(-1, N_channels) * sigma  # (N_bins,3)
-        gt_hat = gt_hat.expand(N_rays, -1, -1)  # (N_rays,N_bins,N_channels)
-
-        gt = gt[:, None, :].expand(-1, N_bins, -1)
-        gt_dist = 10 * torch.exp(-(gt_hat - gt) ** 2 / 5)  # (N_rays,N_bins,N_channels)
-        gt_p = F.softmax(gt_dist, dim=1)  # (N_rays,N_bins,N_channels)
-        gt_p = torch.sum(gt_p, dim=0) / N_rays  # # (N_rays,N_channels)
-
-        est = est[:, None, :].expand(-1, N_bins, -1)
-        est_dist = 10 * torch.exp(-(gt_hat - est) ** 2 / 5)
-        est_p = F.softmax(est_dist, dim=1)
-        est_p = torch.sum(est_p, dim=0) / N_rays
-        return gt_p, est_p

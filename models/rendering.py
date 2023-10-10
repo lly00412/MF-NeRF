@@ -117,9 +117,21 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, rays_t, **kwargs):
             = process_trunks(model, N_trunks, valid_mask, xyzs, dirs, device, **kwargs)
 
         if model.output_transient:
+            n_rays = deltas.size(0)
+            n_samples = deltas.size(1)
             deltas = rearrange(deltas, 'n1 n2 -> (n1 n2)')
             ts = rearrange(ts, 'n1 n2 -> (n1 n2)')
-            opacity[alive_indices], depth[alive_indices], _, rgb[alive_indices], beta[alive_indices] = compute_opacity_and_rgb(model, deltas[alive_indices], ts[alive_indices], static_sigmas[alive_indices], static_rgbs[alive_indices], transient_sigmas[alive_indices], transient_rgbs[alive_indices], transient_betas[alive_indices])
+            ray_idxs = torch.arange(n_rays)
+            start_idxs = ray_idxs*n_samples
+            ray_samples = torch.ones(n_rays)*n_samples
+            rays_a = torch.stack([ray_idxs,start_idxs,ray_samples]).T
+            rays_a = rays_a.long().to(deltas.device)
+            print(rays_a.size())
+            opacity[alive_indices], depth[alive_indices], _, rgb[alive_indices], beta[alive_indices], _ = \
+                compute_opacity_and_rgb(model, rays_a, deltas[alive_indices], ts[alive_indices],
+                                        static_sigmas[alive_indices], static_rgbs[alive_indices],
+                                        transient_sigmas[alive_indices], transient_rgbs[alive_indices],
+                                        transient_betas[alive_indices],kwargs.get('T_threshold', 1e-4))
             alive_indices[N_eff_samples==0] = -1
         else:
             static_sigmas = rearrange(static_sigmas, '(n1 n2) -> n1 n2', n2=N_samples)
@@ -148,9 +160,6 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, rays_t, **kwargs):
     return results
 
 
-import torch
-
-
 def process_trunks(model, N_trunks, valid_mask, xyzs, dirs, device, **kwargs):
 
     static_sigmas = torch.zeros(len(xyzs), device=device)
@@ -177,7 +186,9 @@ def process_trunks(model, N_trunks, valid_mask, xyzs, dirs, device, **kwargs):
             transient_rgbs_chunk = torch.zeros(n_rays, 3, device=device)
             transient_betas_chunk = torch.zeros(n_rays, device=device)
 
-            static_sigmas_chunk[mask_chunk], _static_rgbs, transient_sigmas_chunk[mask_chunk], _transient_rgbs, _transient_betas = model(xyz_chunk[mask_chunk], dirs_chunk[mask_chunk], **kwargs)
+            (static_sigmas_chunk[mask_chunk], _static_rgbs,
+             transient_sigmas_chunk[mask_chunk], _transient_rgbs,
+             _transient_betas) = model(xyz_chunk[mask_chunk], dirs_chunk[mask_chunk], **kwargs)
             static_rgbs_chunk[mask_chunk] = _static_rgbs.float()
             transient_rgbs_chunk[mask_chunk] = _transient_rgbs.float()
             transient_betas_chunk[mask_chunk] = _transient_betas.float()
@@ -245,48 +256,58 @@ def __render_rays_train(model, rays_o, rays_d, hits_t,rays_t, **kwargs):
     static_sigmas, static_rgbs, transient_sigmas, transient_rgbs, transient_betas = model(xyzs, dirs, **kwargs)
 
 
-    results['opacity'], results['depth'], results['ws'], results['rgb'], results['beta'] = \
-        compute_opacity_and_rgb(model, results['deltas'], results['ts'], static_sigmas, static_rgbs, transient_sigmas, transient_rgbs, transient_betas)
+    results['opacity'], results['depth'], results['ws'], results['rgb'], results['beta'], results['vr_samples'] = \
+        compute_opacity_and_rgb(model, rays_a, results['deltas'], results['ts'],
+                                static_sigmas, static_rgbs,
+                                transient_sigmas, transient_rgbs,
+                                transient_betas, kwargs.get('T_threshold', 1e-4))
+
 
     if model.output_transient:
         results['transient_sigmas'] = transient_sigmas
 
     return results
 
-def compute_opacity_and_rgb(model, rays_a, deltas,  ts, static_sigmas, static_rgbs, transient_sigmas, transient_rgbs, transient_betas, T_threshold):
+def compute_opacity_and_rgb(model, rays_a, deltas, ts, static_sigmas, static_rgbs, transient_sigmas, transient_rgbs, transient_betas,T_threshold):
     opacity = []
     depth = []
     ws = []
     rgb = []
     beta = []
+    total_samples = 0
     for ray_idx in rays_a[:,0]:
-        start_idx = rays_a[ray_idx][1], N_samples = rays_a[ray_idx][2];
-        s = torch.arange(start_idx,start_idx+N_samples)
+        start_idx = rays_a[ray_idx][1]
+        ray_samples = rays_a[ray_idx][2]
+        s = torch.arange(start_idx,start_idx+ray_samples)
         if model.output_transient:
             static_alphas = 1 - torch.exp(-deltas[s] * static_sigmas[s])
             transient_alphas = 1 - torch.exp(-deltas[s] * transient_sigmas[s])
             alphas = 1 - torch.exp(-deltas[s] * (static_sigmas[s] + transient_sigmas[s]))
         else:
-            alphas = 1 - torch.exp(-deltas * static_sigmas)
+            alphas = 1 - torch.exp(-deltas[s] * static_sigmas[s])
 
-        alphas_shifted = torch.cat([torch.ones(1).to(alphas.device), 1 - alphas], -1)  # [1, 1-a1, 1-a2, ...]
-        transmittance = torch.cumprod(alphas_shifted[:-1], -1)
+        alphas_shifted = torch.cat([torch.ones(1).to(alphas.device), 1 - alphas])  # [1, 1-a1, 1-a2, ...]
+        transmittance = torch.cumprod(alphas_shifted[:-1],-1)
+
+        eff = (transmittance>T_threshold)
+        total_samples += eff.sum()
 
         if model.output_transient:
-            static_ws = static_alphas * transmittance
-            transient_ws = transient_alphas * transmittance
+            static_ws = static_alphas[eff] * transmittance[eff]
+            transient_ws = transient_alphas[eff] * transmittance[eff]
         else:
-            static_ws = alphas * transmittance
+            static_ws = alphas[eff] * transmittance[eff]
 
+        weigths = alphas[eff] * transmittance[eff]
         ws += [alphas * transmittance]
-        opacity += [torch.sum(ws)]
-        depth += [torch.sum(ws * ts[s])]
+        opacity += [torch.sum(weigths).reshape(1)]
+        depth += [torch.sum(weigths * ts[s][eff]).reshape(1)]
 
-        static_rgb = torch.sum(static_ws.unsqueeze(-1) * static_rgbs, dim=0)
+        static_rgb = torch.sum(static_ws.unsqueeze(-1) * static_rgbs[s][eff], dim=0)
 
         if model.output_transient:
-            transient_rgb = torch.sum(transient_ws.unsqueeze(-1) * transient_rgbs, dim=0)
-            beta += [torch.sum(transient_ws * transient_betas, dim=('n1', 'n2')) + model.beta_min]
+            transient_rgb = torch.sum(transient_ws.unsqueeze(-1) * transient_rgbs[s][eff], dim=0)
+            beta += [torch.sum(transient_ws * transient_betas[s][eff]).reshape(1) + model.beta_min]
 
         rgb += [static_rgb + transient_rgb] if model.output_transient else [static_rgb]
 
@@ -297,4 +318,4 @@ def compute_opacity_and_rgb(model, rays_a, deltas,  ts, static_sigmas, static_rg
     if model.output_transient:
         beta = torch.cat(beta)
 
-    return opacity, depth, ws, rgb, beta
+    return opacity, depth, ws, rgb, beta, total_samples

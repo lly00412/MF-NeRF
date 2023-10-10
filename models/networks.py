@@ -118,9 +118,9 @@ class NGP(nn.Module):
                 nn.Linear(128, 128), nn.ReLU(True),
                 nn.Linear(128,128), nn.ReLU(True))
             # transient output layers
-            self.transient_sigma = nn.Sequential(nn.Linear(128, 1), nn.Softplus())
+            self.transient_sigma = nn.Sequential(nn.Linear(128,1), nn.Softplus())
             self.transient_rgb = nn.Sequential(nn.Dropout(p=0),nn.Linear(128, 3), self.rgb_act)
-            self.transient_beta = nn.Sequential(nn.Linear(128, 1), nn.Softplus())
+            self.transient_beta = nn.Sequential(nn.Linear(128,1), nn.Softplus())
 
         if self.rgb_act == 'None': # rgb_net output is log-radiance
             for i in range(3): # independent tonemappers for r,g,b
@@ -204,8 +204,10 @@ class NGP(nn.Module):
                 transient_encoding_input = torch.cat([t, h], 1)
                 t = self.transient_encoding(transient_encoding_input)
             transient_sigmas = self.transient_sigma(t)  # (B, 1)
+            transient_sigmas = transient_sigmas.squeeze(-1)
             transient_rgbs = self.transient_rgb(t)  # (B, 3)
             transient_betas = self.transient_beta(t)  # (B, 1)
+            transient_betas = transient_betas.squeeze(-1)
         else:
             transient_sigmas = None
             transient_rgbs = None

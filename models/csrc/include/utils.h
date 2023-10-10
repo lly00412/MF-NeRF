@@ -92,34 +92,43 @@ std::vector<torch::Tensor> composite_train_bw_cu(
 );
 
 
-std::vector<torch::Tensor> composite_train_uncert_fw_cu(
-    const torch::Tensor sigmas,
-    const torch::Tensor rgbs,
-    const torch::Tensor u_preds,
+std::vector<torch::Tensor> composite_train_transient_fw_cu(
+    const torch::Tensor static_sigmas,
+    const torch::Tensor static_rgbs,
+    const torch::Tensor transient_sigmas,
+    const torch::Tensor transient_rgbs,
+    const torch::Tensor transient_betas,
     const torch::Tensor deltas,
     const torch::Tensor ts,
     const torch::Tensor rays_a,
     const float T_threshold
 );
 
-
-std::vector<torch::Tensor> composite_train_uncert_bw_cu(
+std::vector<torch::Tensor> composite_train_transient_bw_cu(
     const torch::Tensor dL_dopacity,
     const torch::Tensor dL_ddepth,
-    const torch::Tensor dL_drgb,
-    const torch::Tensor dL_du_pred,
+    const torch::Tensor dL_dstatic_rgb,
+    const torch::Tensor dL_dtransient_rgb,
+    const torch::Tensor dL_dtransient_beta,
     const torch::Tensor dL_dws,
-    const torch::Tensor sigmas,
-    const torch::Tensor rgbs,
-    const torch::Tensor u_preds,
+    const torch::Tensor dL_dstatic_ws,
+    const torch::Tensor dL_dtransient_ws,
+    const torch::Tensor static_sigmas,
+    const torch::Tensor static_rgbs,
+    const torch::Tensor transient_sigmas,
+    const torch::Tensor transient_rgbs,
+    const torch::Tensor transient_betas,
     const torch::Tensor ws,
+    const torch::Tensor static_ws,
+    const torch::Tensor transient_ws,
     const torch::Tensor deltas,
     const torch::Tensor ts,
     const torch::Tensor rays_a,
     const torch::Tensor opacity,
     const torch::Tensor depth,
-    const torch::Tensor rgb,
-    const torch::Tensor u_pred,
+    const torch::Tensor static_rgb,
+    const torch::Tensor transient_rgb,
+    const torch::Tensor transient_beta,
     const float T_threshold
 );
 
@@ -138,10 +147,12 @@ void composite_test_fw_cu(
     torch::Tensor rgb
 );
 
-void composite_test_uncert_fw_cu(
-    const torch::Tensor sigmas,
-    const torch::Tensor rgbs,
-    const torch::Tensor u_preds,
+void composite_test_transient_fw_cu(
+    const torch::Tensor static_sigmas,
+    const torch::Tensor static_rgbs,
+    const torch::Tensor transient_sigmas,
+    const torch::Tensor transient_rgbs,
+    const torch::Tensor transient_betas,
     const torch::Tensor deltas,
     const torch::Tensor ts,
     const torch::Tensor hits_t,
@@ -150,8 +161,9 @@ void composite_test_uncert_fw_cu(
     const torch::Tensor N_eff_samples,
     torch::Tensor opacity,
     torch::Tensor depth,
-    torch::Tensor rgb,
-    torch::Tensor u_pred
+    torch::Tensor static_rgb,
+    torch::Tensor transient_rgb,
+    torch::Tensor transient_beta
 );
 
 std::vector<torch::Tensor> distortion_loss_fw_cu(
