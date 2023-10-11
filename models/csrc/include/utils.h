@@ -147,6 +147,7 @@ void composite_test_fw_cu(
     torch::Tensor rgb
 );
 
+
 void composite_test_transient_fw_cu(
     const torch::Tensor static_sigmas,
     const torch::Tensor static_rgbs,
@@ -165,6 +166,7 @@ void composite_test_transient_fw_cu(
     torch::Tensor transient_rgb,
     torch::Tensor transient_beta
 );
+
 
 std::vector<torch::Tensor> distortion_loss_fw_cu(
     const torch::Tensor ws,

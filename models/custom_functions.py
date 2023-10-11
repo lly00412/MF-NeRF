@@ -142,27 +142,33 @@ class VolumeRenderer_with_transient(torch.autograd.Function):
     """
     @staticmethod
     @custom_fwd(cast_inputs=torch.float32)
-    def forward(ctx, static_sigmas, static_rgbs, transient_sigmas,transient_rgbs,transient_betas, deltas, ts, rays_a, T_threshold):
-        total_samples, opacity, depth, rgb, u_pred, ws = \
-            vren.composite_train_uncert_fw(sigmas, rgbs, u_preds, deltas, ts,
-                                    rays_a, T_threshold)
-        ctx.save_for_backward(sigmas, rgbs, u_preds, deltas, ts, rays_a,
-                              opacity, depth, rgb, u_pred, ws)
+    def forward(ctx, static_sigmas, static_rgbs, transient_sigmas,transient_rgbs, transient_betas, deltas, ts, rays_a, T_threshold):
+        total_samples, opacity, depth, static_rgb, transient_rgb, transient_beta, ws, static_ws, transient_ws = \
+            vren.composite_train_transient_fw(static_sigmas, static_rgbs,
+                                              transient_sigmas,transient_rgbs, transient_betas,
+                                              deltas, ts,rays_a, T_threshold)
+        ctx.save_for_backward(static_sigmas, static_rgbs,
+                              transient_sigmas,transient_rgbs, transient_betas,
+                              deltas, ts, rays_a, opacity, depth, static_rgb, transient_rgb, transient_beta,
+                              ws, static_ws, transient_ws)
         ctx.T_threshold = T_threshold
-        return total_samples.sum(), opacity, depth, rgb, u_pred, ws
+        return total_samples.sum(), opacity, depth, static_rgb, transient_rgb, transient_beta, ws, static_ws, transient_ws
 
     @staticmethod
     @custom_bwd
-    def backward(ctx, dL_dtotal_samples, dL_dopacity, dL_ddepth, dL_drgb, dL_du_pred, dL_dws):
-        sigmas, rgbs, u_preds, deltas, ts, rays_a, \
-        opacity, depth, rgb, u_pred, ws = ctx.saved_tensors
-        dL_dsigmas, dL_drgbs, dL_du_preds = \
-            vren.composite_train_uncert_bw(dL_dopacity, dL_ddepth, dL_drgb,dL_du_pred, dL_dws,
-                                    sigmas, rgbs, u_preds, ws, deltas, ts,
-                                    rays_a,
-                                    opacity, depth, rgb, u_pred,
-                                    ctx.T_threshold)
-        return dL_dsigmas, dL_drgbs, dL_du_preds, None, None, None, None
+    def backward(ctx, dL_dtotal_samples, dL_dopacity, dL_ddepth, dL_dstatic_rgb, dL_dtransient_rgb, dL_dtransient_beta,
+                 dL_dws, dL_dstatic_ws, dL_dtransient_ws,):
+        (static_sigmas, static_rgbs, transient_sigmas, transient_rgbs, transient_betas, deltas, ts, rays_a,
+         opacity, depth, static_rgb, transient_rgb, transient_beta, ws, static_ws, transient_ws) = ctx.saved_tensors
+
+        dL_dstatic_sigmas, dL_dstatic_rgbs, dL_dtransient_sigmas, dL_dtransient_rgbs, dL_dtransient_betas = \
+            vren.composite_train_uncert_bw(dL_dopacity, dL_ddepth, dL_dstatic_rgb,dL_dtransient_rgb,dL_dtransient_beta,
+                                           dL_dws,dL_dstatic_ws,dL_dtransient_ws,
+                                           static_sigmas, static_rgbs, transient_sigmas, transient_rgbs, transient_betas,
+                                           ws, static_ws, transient_ws, deltas, ts,
+                                           rays_a, opacity, depth, static_rgb, transient_rgb, transient_beta,
+                                            ctx.T_threshold)
+        return dL_dstatic_sigmas, dL_dstatic_rgbs, dL_dtransient_sigmas, dL_dtransient_rgbs, dL_dtransient_betas
 
 class VolumeRenderer(torch.autograd.Function):
     """

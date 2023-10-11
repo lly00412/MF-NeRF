@@ -1,6 +1,6 @@
 import torch
 from .custom_functions import \
-    RayAABBIntersector, RayMarcher, VolumeRenderer, VolumeRenderer_with_uncert
+    RayAABBIntersector, RayMarcher, VolumeRenderer, VolumeRenderer_with_transient
 from einops import rearrange, reduce, repeat
 import vren
 import numpy as np
