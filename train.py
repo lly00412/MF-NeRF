@@ -42,6 +42,8 @@ from utils import *
 import time
 from tqdm import trange
 
+from WarperPytorch import Warper
+
 import warnings; warnings.filterwarnings("ignore")
 
 def err2img(err,flip=False):
@@ -217,8 +219,8 @@ class NeRFSystem(LightningModule):
         results = self(batch,split='test')
 
         logs = {}
-        logs['pose'] = batch['pose']
-        print(batch['pose'])
+        P = batch['pose']
+        logs['pose'] = torch.cat([P, torch.tensor([[0, 0, 0, 1]]).to(P.device)])
         # compute each metric per image
         self.val_psnr(results['rgb'], rgb_gt)
         logs['psnr'] = self.val_psnr.compute()
@@ -279,7 +281,8 @@ class NeRFSystem(LightningModule):
 
             rgb_pred = (rgb_pred*255).astype(np.uint8)
             depth = rearrange(results['depth'].cpu().numpy(), '(h w) -> h w', h=h)
-            logs['depth'] = rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)
+            logs['depth'] = rearrange(results['depth'].cpu(), '(h w) -> 1 h w', h=h)
+            logs['resolution'] = (h,w)
             outputs['data']['depth'] = depth
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_pred.png'), rgb_pred)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_d.png'), depth2img(depth))
@@ -316,9 +319,36 @@ class NeRFSystem(LightningModule):
             self.log('test/lpips_vgg', mean_lpips)
 
         if self.hparams.warp:
-            K = self.test_dataset.K
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             poses = torch.stack([x['pose'] for x in outputs])
             depths = torch.stack([x['depth'] for x in outputs])
+            (h,w) = outputs[0]['resolution']
+            self.Warper = Warper(resolution=(h,w))
+            N_views = depths.size(0) - 1
+            depth_ref = depths[0].unsqueeze(0).expand(N_views,-1,-1,-1)
+            transformation_ref = poses[0].unsqueeze(0).expand(N_views,-1,-1)
+            transformation_target = poses[1:,...]
+            K_ref = self.test_dataset.K
+            K_ref = K_ref.unsqueeze(0).expand(N_views,-1,-1)
+            K_target = K_ref
+            mask1 = torch.ones(depth_ref.size())
+            warped_depths, _ = self.Warper.forward_warp_depth(depth1=depth_ref, mask1 = mask1,
+                                                              transformation1=transformation_ref, transformation2=transformation_target,
+                                                              intrinsic1=K_ref,intrinsic2=K_target)
+            for img_id in trange(N_views):
+                warped_depth = warped_depths[img_id]
+                valid_mask = (warped_depth > 0)
+                warp_err = torch.zeros(warped_depth.size()).to(warped_depth)
+                depth_gt = depths[img_id+1,...].to(warped_depth)
+                warp_err[valid_mask] = (depth_gt[valid_mask] - warped_depth[valid_mask]) ** 2
+
+                warped_depth = rearrange(warped_depths.cpu().numpy(), '1 h w -> h w', h=h)
+                imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id + 1:03d}_warpd.png'), depth2img(warped_depth))
+                warp_err = rearrange(warp_err.cpu().numpy(), '1 h w -> h w', h=h)
+                imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id+1:03d}_warpe.png'), err2img(warp_err))
+
+
+
 
     def get_progress_bar_dict(self):
         # don't show the version number

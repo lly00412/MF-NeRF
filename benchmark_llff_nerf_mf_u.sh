@@ -21,5 +21,6 @@ do
     --loss ${losses} \
     --fewshot 10 \
     --save_output \
-    --val_only --ckpt_path ${CKPT_DIR}/${SCENES}/epoch=9.ckpt
+    --val_only --ckpt_path ${CKPT_DIR}/${SCENES}/epoch=9.ckpt \
+    --warp
   done
