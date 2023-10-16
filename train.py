@@ -342,7 +342,7 @@ class NeRFSystem(LightningModule):
                 depth_gt = depths[img_id+1,...].to(warped_depth)
                 warp_err[valid_mask] = (depth_gt[valid_mask] - warped_depth[valid_mask]) ** 2
 
-                warped_depth = rearrange(warped_depths.cpu().numpy(), '1 h w -> h w', h=h)
+                warped_depth = rearrange(warped_depth.cpu().numpy(), '1 h w -> h w', h=h)
                 imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id + 1:03d}_warpd.png'), depth2img(warped_depth))
                 warp_err = rearrange(warp_err.cpu().numpy(), '1 h w -> h w', h=h)
                 imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id+1:03d}_warpe.png'), err2img(warp_err))
