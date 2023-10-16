@@ -10,31 +10,13 @@ from .rendering import NEAR_DISTANCE
 
 
 class NGP(nn.Module):
-    # def __init__(self, scale, hparams, rgb_act='Sigmoid',uncert=False):
-    def __init__(self, scale, hparams, rgb_act='Sigmoid',
-                 in_channels_a=48,
-                 in_channels_t=16,
-                 beta_min=0.03):
-        beta_min = 0.03
+    def __init__(self, scale, hparams, rgb_act='Sigmoid'):
         super().__init__()
-        """
-        ---Parameters for NeRF-W (used in fine model only as per section 4.3)---
-        ---cf. Figure 3 of the paper---
-        encode_appearance: whether to add appearance encoding as input (NeRF-A)
-        in_channels_a: appearance embedding dimension. n^(a) in the paper
-        encode_transient: whether to add transient encoding as input (NeRF-U)
-        in_channels_t: transient embedding dimension. n^(tau) in the paper
-        beta_min: minimum pixel color variance
-        """
 
-
-
-        if not rgb_act=='None':
-            self.rgb_act = nn.Sigmoid()
+        self.rgb_act = rgb_act
 
         # scene bounding box
         self.scale = scale
-        self.output_transient = hparams.output_transient
         self.register_buffer('center', torch.zeros(1, 3))
         self.register_buffer('xyz_min', -torch.ones(1, 3)*scale)
         self.register_buffer('xyz_max', torch.ones(1, 3)*scale)
@@ -45,17 +27,6 @@ class NGP(nn.Module):
         self.grid_size = 128
         self.register_buffer('density_bitfield',
             torch.zeros(self.cascades*self.grid_size**3//8, dtype=torch.uint8))
-
-        # Nerf-W
-
-        self.embedding_a = nn.Embedding(hparams.N_vocab, hparams.N_a)
-        self.embedding_t = nn.Embedding(hparams.N_vocab, hparams.N_tau)
-
-        self.encode_appearance = hparams.encode_a
-        self.in_channels_a = in_channels_a if hparams.encode_a else 0
-        self.encode_transient = hparams.encode_t
-        self.in_channels_t = in_channels_t
-        self.beta_min = beta_min
 
         # constants
         L = hparams.L; F = hparams.F; log2_T = hparams.T; N_min = hparams.N_min; N_tables = hparams.N_tables
@@ -95,32 +66,17 @@ class NGP(nn.Module):
                 },
             )
 
-        self. dir_a_encoder = nn.Sequential(
-                        nn.Linear(16+self.in_channels_a, 16), nn.ReLU(True))
-
-        self.static_rgb_net = nn.Sequential(
-            nn.Linear(32, 128,bias=False),
-            nn.ReLU(),
-            nn.Linear(128, 128,bias=False),
-            nn.ReLU(),
-            nn.Linear(128, 128,bias=False),
-            nn.ReLU(),
-            nn.Dropout(p=0),
-            nn.Linear(128, 3,bias=False),
-            self.rgb_act,
-        )
-
-        if self.encode_transient:
-            # transient encoding layers
-            self.transient_encoding = torch.nn.Sequential(
-                nn.Linear(16+in_channels_t, 128), nn.ReLU(True),
-                nn.Linear(128, 128), nn.ReLU(True),
-                nn.Linear(128, 128), nn.ReLU(True),
-                nn.Linear(128,128), nn.ReLU(True))
-            # transient output layers
-            self.transient_sigma = nn.Sequential(nn.Linear(128,1), nn.Softplus())
-            self.transient_rgb = nn.Sequential(nn.Dropout(p=0),nn.Linear(128, 3), self.rgb_act)
-            self.transient_beta = nn.Sequential(nn.Linear(128,1), nn.Softplus())
+        self.rgb_net = \
+            tcnn.Network(
+                n_input_dims=32, n_output_dims=3,
+                network_config={
+                    "otype": "FullyFusedMLP",
+                    "activation": "ReLU",
+                    "output_activation": self.rgb_act,
+                    "n_neurons": hparams.rgb_channels,
+                    "n_hidden_layers": hparams.rgb_layers,
+                }
+            )
 
         if self.rgb_act == 'None': # rgb_net output is log-radiance
             for i in range(3): # independent tonemappers for r,g,b
@@ -175,56 +131,28 @@ class NGP(nn.Module):
         rgbs = torch.cat(out, 1)
         return rgbs
 
-    def forward(self, x, d,  **kwargs):
+    def forward(self, x, d, **kwargs):
         """
         Inputs:
             x: (N, 3) xyz in [-scale, scale]
             d: (N, 3) directions
-            a: (N, in_channels_a) apperientszu
-            t: (N, in_channels_t) transient
 
         Outputs:
             sigmas: (N)
             rgbs: (N, 3)
-
         """
-        # static network
-        static_sigmas, h = self.density(x, return_feat=True)  # h (N,16)
+        sigmas, h = self.density(x, return_feat=True)
         d = d/torch.norm(d, dim=1, keepdim=True)
-        d = self.dir_encoder((d+1)/2) # (N,16)
-        if self.encode_appearance:
-            a = kwargs['a_embedded']
-            d = self.dir_a_encoder(torch.cat([d,a],1))
-        static_rgbs = self.static_rgb_net(torch.cat([d, h], 1))
+        d = self.dir_encoder((d+1)/2)
+        rgbs = self.rgb_net(torch.cat([d, h], 1))
 
-        # transient network
-        if self.output_transient:
-            t = kwargs['t_embedded']
-            if self.encode_transient:
-                transient_encoding_input = torch.cat([t, h], 1)
-                t = self.transient_encoding(transient_encoding_input)
-            transient_sigmas = self.transient_sigma(t)  # (B, 1)
-            transient_sigmas = transient_sigmas.squeeze(-1)
-            transient_rgbs = self.transient_rgb(t)  # (B, 3)
-            transient_betas = self.transient_beta(t)  # (B, 1)
-            transient_betas = transient_betas.squeeze(-1)
-        else:
-            transient_sigmas = None
-            transient_rgbs = None
-            transient_betas = None
+        if self.rgb_act == 'None': # rgbs is log-radiance
+            if kwargs.get('output_radiance', False): # output HDR map
+                rgbs = TruncExp.apply(rgbs)
+            else: # convert to LDR using tonemapper networks
+                rgbs = self.log_radiance_to_rgb(rgbs, **kwargs)
 
-        if self.rgb_act == 'None':  # rgbs is log-radiance
-            if kwargs.get('output_radiance', False):  # output HDR map
-                static_rgbs = TruncExp.apply(static_rgbs)
-                if self.output_transient:
-                    transient_rgbs = TruncExp.apply(transient_rgbs)
-            else:  # convert to LDR using tonemapper networks
-                static_rgbs = self.log_radiance_to_rgb(static_rgbs, **kwargs)
-                if self.output_transient:
-                    transient_rgbs = self.log_radiance_to_rgb(transient_rgbs, **kwargs)
-
-        return static_sigmas, static_rgbs, transient_sigmas, transient_rgbs, transient_betas
-
+        return sigmas, rgbs
 
     @torch.no_grad()
     def get_all_cells(self):
