@@ -78,7 +78,7 @@ class NeRFSystem(LightningModule):
                 p.requires_grad = False
 
         if self.hparams.loss in ['nll','nllc']:
-            self.hparams.output_transient = True
+            self.hparams.uncert = True
 
         rgb_act = 'None' if self.hparams.use_exposure else 'Sigmoid'
         self.model = NGP(scale=self.hparams.scale, 
@@ -104,7 +104,6 @@ class NeRFSystem(LightningModule):
             poses[..., 3] += self.dT[batch['img_idxs']]
 
         rays_o, rays_d = get_rays(directions, poses)
-        rays_t = batch['img_idxs'] * torch.ones(len(rays_o)).to(batch['img_idxs'].device)
 
         kwargs = {'test_time': split!='train',
                   'random_bg': self.hparams.random_bg}
@@ -113,7 +112,7 @@ class NeRFSystem(LightningModule):
         if self.hparams.use_exposure:
             kwargs['exposure'] = batch['exposure']
 
-        return render(self.model, rays_o, rays_d, rays_t,**kwargs)
+        return render(self.model, rays_o, rays_d, **kwargs)
 
     def setup(self, stage):
         dataset = dataset_dict[self.hparams.dataset_name]
@@ -218,6 +217,8 @@ class NeRFSystem(LightningModule):
         results = self(batch,split='test')
 
         logs = {}
+        logs['pose'] = batch['pose']
+        print(batch['pose'])
         # compute each metric per image
         self.val_psnr(results['rgb'], rgb_gt)
         logs['psnr'] = self.val_psnr.compute()
@@ -278,6 +279,7 @@ class NeRFSystem(LightningModule):
 
             rgb_pred = (rgb_pred*255).astype(np.uint8)
             depth = rearrange(results['depth'].cpu().numpy(), '(h w) -> h w', h=h)
+            logs['depth'] = rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)
             outputs['data']['depth'] = depth
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_pred.png'), rgb_pred)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_d.png'), depth2img(depth))
@@ -285,11 +287,6 @@ class NeRFSystem(LightningModule):
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), err2img(err.mean(-1)))
 
             ########### save output_transient ##################
-            if self.hparams.output_transient:
-                beta = rearrange(results['beta'].cpu().numpy(), '(h w) -> h w ', h=h)
-                outputs['data']['beta'] = np.exp(beta)
-                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_b.png'), err2img(beta))
-
             if self.hparams.mcdropout:
                 mcd = rearrange(results['mcd'].cpu().numpy(), '(h w) -> h w', h=h)
                 outputs['data']['mcd'] = mcd
@@ -317,6 +314,11 @@ class NeRFSystem(LightningModule):
             lpipss = torch.stack([x['lpips'] for x in outputs])
             mean_lpips = all_gather_ddp_if_available(lpipss).mean()
             self.log('test/lpips_vgg', mean_lpips)
+
+        if self.hparams.warp:
+            K = self.test_dataset.K
+            poses = torch.stack([x['pose'] for x in outputs])
+            depths = torch.stack([x['depth'] for x in outputs])
 
     def get_progress_bar_dict(self):
         # don't show the version number
