@@ -72,11 +72,13 @@ class ColmapDataset(BaseDataset):
         pts3d = read_points3d_binary(os.path.join(self.root_dir, 'sparse/0/points3D.bin'))
         pts3d = np.array([pts3d[k].xyz for k in pts3d]) # (N, 3)
 
+        self.raw_poses = poses
         self.poses, self.pts3d = center_poses(poses, pts3d)
 
         scale = np.linalg.norm(self.poses[..., 3], axis=-1).min()
         self.poses[..., 3] /= scale
         self.pts3d /= scale
+        self.scale = scale
 
         self.rays = []
         if split == 'test_traj': # use precomputed test poses
@@ -126,11 +128,13 @@ class ColmapDataset(BaseDataset):
                 img_paths = [x for i, x in enumerate(img_paths) if i%8==0]
                 self.poses = np.array([x for i, x in enumerate(self.poses) if i%8==0])
 
-        if self.fewshot>0:
-            np.random.seed(self.seed)
-            subs = np.random.choice(len(img_paths), self.fewshot)
-            img_paths = np.array(img_paths)[subs]
-            self.poses = self.poses[subs]
+        if split=='train':
+            if self.fewshot>0:
+                np.random.seed(self.seed)
+                subs = np.random.choice(len(img_paths), self.fewshot)
+                img_paths = np.array(img_paths)[subs]
+                self.poses = self.poses[subs]
+                self.raw_poses = self.raw_poses[subs]
 
         print(f'Loading {len(img_paths)} {split} images ...')
 

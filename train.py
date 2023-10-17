@@ -218,6 +218,7 @@ class NeRFSystem(LightningModule):
 
         logs = {}
         logs['pose'] = batch['pose']
+        logs['raw_pose'] = batch['raw_pose']
         # compute each metric per image
         self.val_psnr(results['rgb'], rgb_gt)
         logs['psnr'] = self.val_psnr.compute()
@@ -315,27 +316,101 @@ class NeRFSystem(LightningModule):
             self.log('test/lpips_vgg', mean_lpips)
 
         if self.hparams.warp:
+
+            # scale depth back and use the raw poses to do warp (nerf rendered by centered poses)
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            raw_poses = torch.stack([x['raw_pose'] for x in outputs])
             poses = torch.stack([x['pose'] for x in outputs])
             depths = torch.stack([x['depth'] for x in outputs])
             N_views = depths.size(0)
             K = self.test_dataset.K
+            scale = self.test_dataset.scale
+            depths_scale = torch.stack([x['depth'] for x in outputs])
+            depths_scale *= scale
+            poses_scale = torch.stack([x['pose'] for x in outputs])
+            poses_scale[..., 3] *= scale
+
+            imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_dscale.png'),
+                           depth2img(depths_scale[0].cpu().numpy()))
+
             for img_id in trange(1, N_views): # warp depth 0 to other views
                 tgt_depth = depths[0]
+                tgt_depth_scale = depths_scale[0]
+                tgt_x,tgt_y = (2490,2698)
+
+                print(f'depth 000: cord: ({tgt_x},{tgt_y}), value: {tgt_depth[tgt_x,tgt_y]}, scale value:{tgt_depth_scale[tgt_x,tgt_y]}')
+                tgt_depth2 = torch.zeros_like(tgt_depth)
+                tgt_depth2[tgt_x,tgt_y] = tgt_depth[tgt_x,tgt_y]
+                tgt_depth_scale2 = torch.zeros_like(tgt_depth_scale)
+                tgt_depth_scale2[tgt_x,tgt_y] = tgt_depth_scale[tgt_x,tgt_y]
+
                 ref_cams = {'pose':poses[img_id],
                             'K': K}
                 tgt_cams = {'pose':poses[0],
                             'K':K}
-                warped_depth = warp_tgt_to_ref(tgt_depth,ref_cams, tgt_cams, device)
+                ref_cams_scale = {'pose': poses_scale[img_id],
+                            'K': K}
+                tgt_cams_scale = {'pose': poses_scale[0],
+                            'K': K}
+
+                warped_depth = warp_tgt_to_ref(tgt_depth, ref_cams, tgt_cams, device)
+                imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpd.png'),
+                               depth2img(warped_depth.cpu().numpy()))
+
+                warped_depth_scale = warp_tgt_to_ref(tgt_depth_scale,ref_cams_scale, tgt_cams_scale, device)
+                imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpd_scale.png'),
+                               depth2img(warped_depth_scale.cpu().numpy()))
+
+                warped_depth2 = warp_tgt_to_ref(tgt_depth2, ref_cams, tgt_cams, device)
+                warped_depth_scale2 = warp_tgt_to_ref(tgt_depth_scale2, ref_cams_scale, tgt_cams_scale, device)
+
+                print(f'using centered poses:')
+                print(f'warp 000 to 001 cord: {torch.nonzero(warped_depth2)}, value: {warped_depth2[warped_depth2 > 0]}')
+                print(
+                    f'warp(scale) 000 to 001 cord: {torch.nonzero(warped_depth_scale2)}, value: {warped_depth_scale2[warped_depth_scale2 > 0]}')
+
+                ref_cams_raw = {'pose': raw_poses[img_id],
+                            'K': K}
+                tgt_cams_raw = {'pose': raw_poses[0],
+                            'K': K}
+
+                raw_poses_norm = raw_poses
+                raw_poses_norm[...,3] /= scale
+                ref_cams_raw_norm = {'pose': raw_poses_norm[img_id],
+                                'K': K}
+                tgt_cams_raw_norm = {'pose': raw_poses_norm[0],
+                                'K': K}
+
+                warped_depth_raw_scale = warp_tgt_to_ref(tgt_depth_scale, ref_cams_raw, tgt_cams_raw, device)
+                imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpd_raw_scale.png'),
+                               depth2img(warped_depth_raw_scale.cpu().numpy()))
+
+                warped_depth_raw_norm = warp_tgt_to_ref(tgt_depth, ref_cams_raw_norm, tgt_cams_raw_norm, device)
+                imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpd_raw.png'),
+                               depth2img(warped_depth_raw_norm.cpu().numpy()))
+
+                warped_depth_raw_norm2 = warp_tgt_to_ref(tgt_depth2, ref_cams_raw_norm, tgt_cams_raw_norm, device)
+                warped_depth_scale_raw2 = warp_tgt_to_ref(tgt_depth_scale2, ref_cams_raw, tgt_cams_raw, device)
+                print(f'using raw poses:')
+                print(
+                    f'warp 000 to 001 cord: {torch.nonzero(warped_depth_raw_norm2)}, value: {warped_depth_raw_norm2[warped_depth_raw_norm2 > 0]}')
+                print(
+                    f'warp(scale) 000 to 001 cord: {torch.nonzero(warped_depth_scale_raw2)}, value: {warped_depth_scale_raw2[warped_depth_scale_raw2 > 0]}')
+
                 valid_mask = (warped_depth > 0)
                 warp_err = torch.zeros(warped_depth.size()).to(warped_depth)
                 depth_gt = depths[img_id,...].to(warped_depth)
+                depth_gt_scale = depths_scale[img_id,...].to(warped_depth_scale)
+                gt_x,gt_y = (2439,2583)
+
+                print(f'depth 001: cord: ({gt_x}, {gt_y}), value: {depth_gt[gt_x,gt_y]}, scale value: {depth_gt_scale[gt_x,gt_y]}')
+
                 warp_err[valid_mask] = (depth_gt[valid_mask] - warped_depth[valid_mask]) ** 2
 
-                warped_depth = warped_depth.cpu().numpy()
-                imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpd.png'), depth2img(warped_depth))
                 warp_err = warp_err.cpu().numpy()
                 imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpe.png'), err2img(warp_err))
+                imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_dscale.png'),
+                               depth2img(depths_scale[img_id].cpu().numpy()))
 
 
 

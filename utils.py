@@ -52,7 +52,6 @@ def slim_ckpt(ckpt_path, save_poses=False):
 def warp_tgt_to_ref(tgt_depth, ref_cams, tgt_cams, device='cpu'):
     # warp tgt depth map to ref view
     height, width = tgt_depth.shape
-
     # grab intrinsics and extrinsics from reference view
     P_ref = torch.zeros(4,4)
     P_ref[:3,:] = ref_cams['pose'] # 3x4 -> 4x4

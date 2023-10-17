@@ -37,6 +37,8 @@ class BaseDataset(Dataset):
                 sample['exposure'] = rays[:, 3:]
         else:
             sample = {'pose': self.poses[idx], 'img_idxs': idx}
+            if hasattr(self, "raw_poses"):
+                sample['raw_pose'] = self.raw_poses[idx]
             if len(self.rays)>0: # if ground truth available
                 rays = self.rays[idx]
                 sample['rgb'] = rays[:, :3]
