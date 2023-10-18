@@ -1,5 +1,6 @@
 import torch
-
+import matplotlib.pyplot as plt
+import numpy as np
 def enable_dropout(model,p=0.2):
     """ Function to enable the dropout layers during test-time """
     for m in model.modules():
@@ -135,3 +136,49 @@ def warp_tgt_to_ref(tgt_depth, ref_cams, tgt_cams, device='cpu'):
     warped_depth = warped_depth.reshape(height, width)
 
     return warped_depth
+
+
+def percentile(t: torch.tensor, q):
+    """
+    Return the ``q``-th percentile of the flattened input tensor's data.
+
+    CAUTION:
+     * Needs PyTorch >= 1.1.0, as ``torch.kthvalue()`` is used.
+     * Values are not interpolated, which corresponds to
+       ``numpy.percentile(..., interpolation="nearest")``.
+
+    :param t: Input tensor.
+    :param q: Percentile to compute, which must be between 0 and 100 inclusive.
+    :return: Resulting value (scalar).
+    """
+    # Note that ``kthvalue()`` works one-based, i.e. the first sorted value
+    # indeed corresponds to k=1, not k=0! Use float(q) instead of q directly,
+    # so that ``round()`` returns an integer, even if q is a np.float32.
+    k = 1 + round(.01 * float(q) * (t.numel() - 1))
+    result = t.view(-1).kthvalue(k).values.item()
+    return result
+
+def compute_roc(opt,est,intervals = 20):
+    ROC = []
+    quants = [100. / intervals * t for t in range(1, intervals + 1)]
+    thres = [np.percentile(est, q) for q in quants]
+    subs = [est <= t for t in thres]
+    ROC_points = [opt[s].mean() for s in subs]
+    [ROC.append(r) for r in ROC_points]
+    AUC = np.trapz(ROC, dx=1. / intervals)
+    return ROC,AUC
+
+def plot_roc(ROC_opt,ROC_est,fig_name, intervals = 20, opt_label='rgb_err',est_label='depth_err'):
+    quants = [100. / intervals * t for t in range(1, intervals + 1)]
+    plt.figure()
+    plt.plot(quants, ROC_opt, marker="^", markersize=8,  color='blue', label=opt_label)
+    plt.plot(quants, ROC_est, marker="o", markersize=8,  color='red', label=est_label)
+    plt.xticks(quants)
+    plt.xlabel('Sample Size(%)')
+    plt.ylabel('Accumulative MSE')
+    plt.legend()
+    fig = plt.gcf()
+    fig.set_size_inches(20, 8)
+    plt.rcParams.update({'font.size': 30})
+    fig.savefig(fig_name)
+    plt.close()

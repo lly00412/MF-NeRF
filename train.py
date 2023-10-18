@@ -44,6 +44,7 @@ from tqdm import trange
 
 import warnings; warnings.filterwarnings("ignore")
 
+
 def err2img(err,flip=False):
     if flip:
         err = 1 - (err / np.quantile(err, 0.9))*0.8
@@ -274,6 +275,7 @@ class NeRFSystem(LightningModule):
             rgb_gt = rearrange(batch['rgb'].cpu().numpy(), '(h w) c -> h w c', h=h)
             outputs['data']['rgb_gt'] = rgb_gt
             err = (rgb_gt - rgb_pred)**2
+            logs['err'] = err.mean(-1)
             rgb_gt = (rgb_gt * 255).astype(np.uint8)
             ############################
 
@@ -319,34 +321,45 @@ class NeRFSystem(LightningModule):
 
             # scale depth back and use the raw poses to do warp (nerf rendered by centered poses)
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            raw_poses = torch.stack([x['raw_pose'] for x in outputs])
+            poses = torch.stack([x['raw_pose'] for x in outputs])
             depths = torch.stack([x['depth'] for x in outputs])
+            errs = np.stack([x['err'] for x in outputs])
             N_views = depths.size(0)
             K = self.test_dataset.K
             scale = self.test_dataset.scale
 
-            raw_poses[..., 3] /= scale
+            poses[..., 3] /= scale
             depths *= scale
+
 
             for img_id in trange(1, N_views): # warp depth 0 to other views
                 tgt_depth = depths[0]
 
-                ref_cams_raw = {'pose': raw_poses[img_id],
+                ref_cams = {'pose': poses[img_id],
                             'K': K}
-                tgt_cams_raw = {'pose': raw_poses[0],
+                tgt_cams = {'pose': poses[0],
                             'K': K}
 
-                warped_depth_raw = warp_tgt_to_ref(tgt_depth, ref_cams_raw, tgt_cams_raw, device)
-                imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpd_raw.png'),
-                               depth2img(warped_depth_raw.cpu().numpy()))
+                warped_depth = warp_tgt_to_ref(tgt_depth, ref_cams, tgt_cams, device)
+                imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpd.png'),
+                               depth2img(warped_depth.cpu().numpy()))
 
-                valid_mask = (warped_depth_raw > 0)
-                warp_err = torch.zeros(warped_depth_raw.size()).to(warped_depth_raw)
-                depth_gt = depths[img_id,...].to(warped_depth_raw)
+                valid_mask = (warped_depth > 0)
+                warp_err = torch.zeros(warped_depth.size()).to(warped_depth)
+                depth_gt = depths[img_id,...].to(warped_depth)
 
-                warp_err[valid_mask] = (depth_gt[valid_mask] - warped_depth_raw[valid_mask]) ** 2
+                warp_err[valid_mask] = (depth_gt[valid_mask] - warped_depth[valid_mask]) ** 2
 
+                valid_mask = valid_mask.cpu().numpy()
                 warp_err = warp_err.cpu().numpy()
+                rgb_err = errs[img_id]
+
+                roc_opt, auc_opt = compute_roc(rgb_err[valid_mask], rgb_err[valid_mask], intervals=20)
+                roc_est, auc_est = compute_roc(rgb_err[valid_mask], warp_err[valid_mask], intervals=20)
+                fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
+                plot_roc(roc_opt,roc_est,fig_name,opt_label='rgb_err',est_label='warp_err')
+                plot_roc(roc_opt, roc_est, fig_name, opt_label='rgb_err', est_label='warp_err')
+
                 imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpe.png'), err2img(warp_err))
 
 
