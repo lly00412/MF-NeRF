@@ -1,6 +1,6 @@
 #!/bin/bash
 
-scenes=(fern flower horns)
+scenes=(horns)
 losses=l2
 export ROOT_DIR=/mnt/Data2/datasets/nerf_llff_data/
 export CKPT_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/nerf_llff/mfgrid_T20_levels_16_F_2_tables_8_rgb_2ly_128ch/${losses}/
