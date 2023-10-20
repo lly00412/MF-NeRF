@@ -321,46 +321,62 @@ class NeRFSystem(LightningModule):
 
             # scale depth back and use the raw poses to do warp (nerf rendered by centered poses)
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            poses = torch.stack([x['raw_pose'] for x in outputs])
+            raw_poses = torch.stack([x['raw_pose'] for x in outputs])
+            poses = torch.stack([x['pose'] for x in outputs])
             depths = torch.stack([x['depth'] for x in outputs])
-            errs = np.stack([x['err'] for x in outputs])
-            N_views = depths.size(0)
+            # errs = np.stack([x['err'] for x in outputs])
+            errs = torch.from_numpy(np.stack([x['err'] for x in outputs]))
             K = self.test_dataset.K
             scale = self.test_dataset.scale
 
-            poses[..., 3] /= scale
-            depths *= scale
+            cams = {'K': K,
+                    'poses': poses,
+                    'raw_poses':raw_poses,
+                    'scale':scale}
+
+            torch.save(cams, os.path.join(self.val_dir, f'cams.pth'))
+            torch.save(depths, os.path.join(self.val_dir, f'depths.pth'))
+            torch.save(errs, os.path.join(self.val_dir, f'errs.pth'))
 
 
-            for img_id in trange(1, N_views): # warp depth 0 to other views
-                tgt_depth = depths[0]
 
-                ref_cams = {'pose': poses[img_id],
-                            'K': K}
-                tgt_cams = {'pose': poses[0],
-                            'K': K}
-
-                warped_depth = warp_tgt_to_ref(tgt_depth, ref_cams, tgt_cams, device)
-                imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpd.png'),
-                               depth2img(warped_depth.cpu().numpy()))
-
-                valid_mask = (warped_depth > 0)
-                warp_err = torch.zeros(warped_depth.size()).to(warped_depth)
-                depth_gt = depths[img_id,...].to(warped_depth)
-
-                warp_err[valid_mask] = (depth_gt[valid_mask] - warped_depth[valid_mask]) ** 2
-
-                valid_mask = valid_mask.cpu().numpy()
-                warp_err = warp_err.cpu().numpy()
-                rgb_err = errs[img_id]
-
-                roc_opt, auc_opt = compute_roc(rgb_err[valid_mask], rgb_err[valid_mask], intervals=20)
-                roc_est, auc_est = compute_roc(rgb_err[valid_mask], warp_err[valid_mask], intervals=20)
-                fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
-                plot_roc(roc_opt,roc_est,fig_name,opt_label='rgb_err',est_label='warp_err')
-                plot_roc(roc_opt, roc_est, fig_name, opt_label='rgb_err', est_label='warp_err')
-
-                imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpe.png'), err2img(warp_err))
+            # N_views = depths.size(0)
+            # K = self.test_dataset.K
+            # scale = self.test_dataset.scale
+            #
+            # poses[..., 3] /= scale
+            # depths *= scale
+            #
+            #
+            # for img_id in trange(1, N_views): # warp depth 0 to other views
+            #     tgt_depth = depths[0]
+            #
+            #     ref_cams = {'pose': poses[img_id],
+            #                 'K': K}
+            #     tgt_cams = {'pose': poses[0],
+            #                 'K': K}
+            #
+            #     warped_depth = warp_tgt_to_ref(tgt_depth, ref_cams, tgt_cams, device)
+            #     imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpd.png'),
+            #                    depth2img(warped_depth.cpu().numpy()))
+            #
+            #     valid_mask = (warped_depth > 0)
+            #     warp_err = torch.zeros(warped_depth.size()).to(warped_depth)
+            #     depth_gt = depths[img_id,...].to(warped_depth)
+            #
+            #     warp_err[valid_mask] = (depth_gt[valid_mask] - warped_depth[valid_mask]) ** 2
+            #
+            #     valid_mask = valid_mask.cpu().numpy()
+            #     warp_err = warp_err.cpu().numpy()
+            #     rgb_err = errs[img_id]
+            #
+            #     roc_opt, auc_opt = compute_roc(rgb_err[valid_mask], rgb_err[valid_mask], intervals=20)
+            #     roc_est, auc_est = compute_roc(rgb_err[valid_mask], warp_err[valid_mask], intervals=20)
+            #     fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
+            #     plot_roc(roc_opt,roc_est,fig_name,opt_label='rgb_err',est_label='warp_err')
+            #     plot_roc(roc_opt, roc_est, fig_name, opt_label='rgb_err', est_label='warp_err')
+            #
+            #     imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpe.png'), err2img(warp_err))
 
 
 
