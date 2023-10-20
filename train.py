@@ -324,10 +324,11 @@ class NeRFSystem(LightningModule):
             raw_poses = torch.stack([x['raw_pose'] for x in outputs])
             poses = torch.stack([x['pose'] for x in outputs])
             depths = torch.stack([x['depth'] for x in outputs])
-            # errs = np.stack([x['err'] for x in outputs])
             errs = torch.from_numpy(np.stack([x['err'] for x in outputs]))
-            # K = self.test_dataset.K
-            # scale = self.test_dataset.scale
+
+            N_views = depths.size(0)
+            K = self.test_dataset.K
+            scale = self.test_dataset.scale
 
             # cams = {'K': K,
             #         'poses': poses,
@@ -341,10 +342,6 @@ class NeRFSystem(LightningModule):
             # torch.save(depths, os.path.join(self.val_dir, f'depths.pth'))
             # torch.save(errs, os.path.join(self.val_dir, f'errs.pth'))
             # torch.save(pts3d, os.path.join(self.val_dir, f'pts3d.pth'))
-
-            N_views = depths.size(0)
-            K = self.test_dataset.K
-            scale = self.test_dataset.scale
 
             for img_id in trange(1, N_views): # warp depth 0 to other views
                 tgt_depth = depths[0]
