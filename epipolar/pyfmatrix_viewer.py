@@ -12,44 +12,26 @@ img2 = None
 CENTERED = False
 
 
-# def mouse1_callback(event, x, y, flags, param):
-#     if event == cv2.EVENT_MOUSEMOVE:
-#         print("mouse1 X: " + str(x) + " Y: " + str(y))
-#         y = img1.shape[0] - y
-#         if CENTERED:
-#             x -= img1.shape[1] / 2
-#             y -= img1.shape[0] / 2
-#         mouse1_pt = np.asarray([x, y, 1.0])
-#         i2ray = np.dot(f_matrix, mouse1_pt)
-#         if CENTERED:
-#             i2ray[2] = i2ray[2] - i2ray[0]*img2.shape[1]/2 - i2ray[1]*img2.shape[0]/2
-#         #print(i2ray)
-#         i2pt1_x = 0
-#         i2pt2_x = img2.shape[1]
-#         i2pt1_y = int(-(i2ray[2] + i2ray[0] * i2pt1_x) / i2ray[1])
-#         i2pt2_y = int(-(i2ray[2] + i2ray[0] * i2pt2_x) / i2ray[1])
-#
-#         global img2_line
-# #        img2_line = ((i2pt1_x, img1.shape[0] - i2pt1_y), (i2pt2_x, img1.shape[0] - i2pt2_y))
-#         img2_line = ((i2pt1_x, i2pt1_y), (i2pt2_x, i2pt2_y))
-
-def xy_callback(x,y,CENTERED=True):
-    x -= img1.shape[1] / 2
-    y -= img1.shape[0] / 2
-    mouse1_pt = np.asarray([x, y, 1.0])
-    i2ray = np.dot(f_matrix, mouse1_pt)
-    if CENTERED:
-        i2ray[2] = i2ray[2] - i2ray[0]*img2.shape[1]/2 - i2ray[1]*img2.shape[0]/2
+def mouse1_callback(event, x, y, flags, param):
+    if event == cv2.EVENT_MOUSEMOVE:
+        #print("mouse1 X: " + str(x) + " Y: " + str(y))
+#        y = img1.shape[0] - y
+        if CENTERED:
+            x -= img1.shape[1] / 2
+            y -= img1.shape[0] / 2
+        mouse1_pt = np.asarray([x, y, 1.0])
+        i2ray = np.dot(f_matrix, mouse1_pt)
+        if CENTERED:
+            i2ray[2] = i2ray[2] - i2ray[0]*img2.shape[1]/2 - i2ray[1]*img2.shape[0]/2 
         #print(i2ray)
-    i2pt1_x = 0
-    i2pt2_x = img2.shape[1]
-    i2pt1_y = int(-(i2ray[2] + i2ray[0] * i2pt1_x) / i2ray[1])
-    i2pt2_y = int(-(i2ray[2] + i2ray[0] * i2pt2_x) / i2ray[1])
+        i2pt1_x = 0
+        i2pt2_x = img2.shape[1]
+        i2pt1_y = int(-(i2ray[2] + i2ray[0] * i2pt1_x) / i2ray[1])
+        i2pt2_y = int(-(i2ray[2] + i2ray[0] * i2pt2_x) / i2ray[1])
 
-    global img2_line
-    img2_line = ((i2pt1_x, i2pt1_y), (i2pt2_x, i2pt2_y))
-
-
+        global img2_line
+#        img2_line = ((i2pt1_x, img1.shape[0] - i2pt1_y), (i2pt2_x, img1.shape[0] - i2pt2_y))
+        img2_line = ((i2pt1_x, i2pt1_y), (i2pt2_x, i2pt2_y))
 
 def draw_line(img, line):
     if line is None:
@@ -91,38 +73,24 @@ def fmat_demo(img1l, img2l, fl, scale=1.0):
     print("Img2: " + str(img2.shape))
     #print(f)
 
-    # cv2.namedWindow("img1")
-    # cv2.namedWindow("img2")
-    # cv2.setMouseCallback("img1", mouse1_callback)
-    xy_callback(x=500,y=500)
+    cv2.namedWindow("img1")
+    cv2.namedWindow("img2")
+    cv2.setMouseCallback("img1", mouse1_callback)
 
-    show2 = draw_line(img2, img2_line)
-    show1 = img1
-<<<<<<< HEAD
-=======
-    print(img1)
->>>>>>> de7184b4bcf4dd813bae8e32702aad40c1b91337
-    cv2.imwrite("img1.png", show1)
-    cv2.imwrite("img2.png", show2)
-
-
-
-    # while True:
-    #     show2 = draw_line(img2, img2_line)
-    #     show1 = img1
-    #     cv2.imwrite("img1.png", cv2.cvtColor(show1, cv2.COLOR_BGR2RGB))
-    #     cv2.imwrite("img2.png", cv2.cvtColor(show2, cv2.COLOR_BGR2RGB))
-        # cv2.imshow("img1", cv2.cvtColor(show1, cv2.COLOR_BGR2RGB))
-        # cv2.imshow("img2", cv2.cvtColor(show2, cv2.COLOR_BGR2RGB))
-        # cv2.waitKey(50)
+    while True:
+        show2 = draw_line(img2, img2_line)
+        show1 = img1
+        cv2.imshow("img1", cv2.cvtColor(show1, cv2.COLOR_BGR2RGB))
+        cv2.imshow("img2", cv2.cvtColor(show2, cv2.COLOR_BGR2RGB))
+        cv2.waitKey(50)
         
 
 if __name__ == "__main__":
     if len(sys.argv) < 4:
         print("Usage: pyfmatrix_viewer.py img1_path img2_path F_path [scale]")
         print("Examples:")
-        print("pyfmatrix_viewer.py data/264.bmp data/435.bmp data/f-264-435.txt")
-        print("pyfmatrix_viewer.py data/264.bmp data/435.bmp data/f-264-435.txt 0.25")
+        print("   pyfmatrix_viewer.py data/264.bmp data/435.bmp data/f-264-435.txt")
+        print("   pyfmatrix_viewer.py data/264.bmp data/435.bmp data/f-264-435.txt 0.25")
         quit(-1)
 
     img1_path = sys.argv[1]
