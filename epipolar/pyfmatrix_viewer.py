@@ -98,6 +98,10 @@ def fmat_demo(img1l, img2l, fl, scale=1.0):
 
     show2 = draw_line(img2, img2_line)
     show1 = img1
+<<<<<<< HEAD
+=======
+    print(img1)
+>>>>>>> de7184b4bcf4dd813bae8e32702aad40c1b91337
     cv2.imwrite("img1.png", show1)
     cv2.imwrite("img2.png", show2)
 

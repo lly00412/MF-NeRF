@@ -159,7 +159,7 @@ def center_poses(poses, pts3d=None):
         pts3d_centered: (N, 3) centered point cloud
     """
 
-    pose_avg = average_poses(poses, pts3d) # (3, 4)
+    pose_avg = average_poses(poses, pts3d) # (3, 4) avg c2w
     pose_avg_homo = np.eye(4)
     pose_avg_homo[:3] = pose_avg # convert to homogeneous coordinate for faster computation
                                  # by simply adding 0, 0, 0, 1 as the last row
@@ -168,11 +168,11 @@ def center_poses(poses, pts3d=None):
     poses_homo = \
         np.concatenate([poses, last_row], 1) # (N_images, 4, 4) homogeneous coordinate
 
-    poses_centered = pose_avg_inv @ poses_homo # (N_images, 4, 4)
+    poses_centered = pose_avg_inv @ poses_homo # (N_images, 4, 4) # avg_w2c * c2w
     poses_centered = poses_centered[:, :3] # (N_images, 3, 4)
 
     if pts3d is not None:
-        pts3d_centered = pts3d @ pose_avg_inv[:, :3].T + pose_avg_inv[:, 3:].T
+        pts3d_centered = pts3d @ pose_avg_inv[:, :3].T + pose_avg_inv[:, 3:].T  # p_center * R + t
         return poses_centered, pts3d_centered
 
     return poses_centered
