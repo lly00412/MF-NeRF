@@ -218,8 +218,8 @@ class NeRFSystem(LightningModule):
         results = self(batch,split='test')
 
         logs = {}
-        logs['pose'] = batch['pose']
-        logs['raw_pose'] = batch['raw_pose']
+        # logs['pose'] = batch['pose']
+        # logs['raw_pose'] = batch['raw_pose']
         # compute each metric per image
         self.val_psnr(results['rgb'], rgb_gt)
         logs['psnr'] = self.val_psnr.compute()
@@ -281,7 +281,7 @@ class NeRFSystem(LightningModule):
 
             rgb_pred = (rgb_pred*255).astype(np.uint8)
             depth = rearrange(results['depth'].cpu().numpy(), '(h w) -> h w', h=h)
-            logs['depth'] = rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)
+            # logs['depth'] = rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)
             outputs['data']['depth'] = depth
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_pred.png'), rgb_pred)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_d.png'), depth2img(depth))
@@ -328,7 +328,6 @@ class NeRFSystem(LightningModule):
 
             N_views = depths.size(0)
             K = self.test_dataset.K
-            scale = self.test_dataset.scale
 
             # cams = {'K': K,
             #         'poses': poses,
@@ -380,9 +379,6 @@ class NeRFSystem(LightningModule):
                 plot_roc(roc_opt, roc_est, fig_name, opt_label='rgb_err', est_label='warp_err')
 
                 imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpe.png'), err2img(warp_err))
-
-
-
 
     def get_progress_bar_dict(self):
         # don't show the version number
