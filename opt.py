@@ -62,8 +62,12 @@ def get_opts():
                         help='which loss to train: l2, nagtive loglikihood, nagtive loglikelihood + consistency (by SEDNet)')
     parser.add_argument('--uncert', action='store_true', default=False,
                         help='whether to estimate uncertainty')
+
+    # warp
     parser.add_argument('--warp', action='store_true', default=False,
                         help='whether to warp depth from camera 0 to other val cameras')
+    parser.add_argument('--ref_cam', type=int, default=0,
+                        help='warp depth to which ref cam')
 
 
     # validation options

@@ -447,7 +447,7 @@ vector<float> render_batch(const vector<int> &vol_shape, const vector<float> dep
 */
 
 PYBIND11_MODULE(render_tgt_volume, m) {
-	m.doc() = "MVS Utilities C++ Pluggin";
+//	m.doc() = "MVS Utilities C++ Pluggin";
 	// m.def("render", &render, "A function which renders a reference volume onto a target volume", py::arg("vol_shape"), py::arg("depth_values"), py::arg("original_depth"), py::arg("original_conf"), py::arg("reference_cam"), py::arg("target_cam"), py::arg("scale"));
 	m.def("render_to_ref", &render_to_ref, "A function which renders a target depth map into a reference view", py::arg("shape"),py::arg("depth_map"), py::arg("reference_cam"), py::arg("target_cam"));
 }

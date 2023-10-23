@@ -39,6 +39,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.utilities.distributed import all_gather_ddp_if_available
 
 from utils import *
+# from warp.warp_utils import warp_tgt_to_ref
 import time
 from tqdm import trange
 
@@ -90,7 +91,6 @@ class NeRFSystem(LightningModule):
             torch.zeros(self.model.cascades, G**3))
         self.model.register_buffer('grid_coords',
             create_meshgrid3d(G, G, G, False, dtype=torch.int32).reshape(-1, 3))
-
     def forward(self, batch, split):
         if split=='train':
             poses = self.poses[batch['img_idxs']]
@@ -127,7 +127,7 @@ class NeRFSystem(LightningModule):
         self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
 
         self.test_dataset = dataset(split='test', **kwargs)
-        self.hparams.N_vocab = self.train_dataset.N_vocab + self.test_dataset.N_vocab
+        # self.hparams.N_vocab = self.train_dataset.N_vocab + self.test_dataset.N_vocab
 
     def configure_optimizers(self):
         # define additional parameters
@@ -209,6 +209,12 @@ class NeRFSystem(LightningModule):
         if (not self.hparams.no_save_test) or self.hparams.warp:
             self.val_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}'
             os.makedirs(self.val_dir, exist_ok=True)
+        # for warp
+        if self.hparams.warp:
+            ref_idx = self.hparams.ref_cam
+            self.ref_pose = self.test_dataset.poses[ref_idx]
+            self.K = torch.eye(4)
+            self.K[:3, :3] = self.test_dataset.K.cpu()
 
     def validation_step(self, batch, batch_nb):
         # print(batch.keys()) #dict_keys(['pose', 'img_idxs', 'rgb'])
@@ -218,7 +224,6 @@ class NeRFSystem(LightningModule):
         results = self(batch,split='test')
 
         logs = {}
-        # logs['raw_pose'] = batch['raw_pose']
         # compute each metric per image
         self.val_psnr(results['rgb'], rgb_gt)
         logs['psnr'] = self.val_psnr.compute()
@@ -233,12 +238,12 @@ class NeRFSystem(LightningModule):
         self.val_ssim.reset()
         outputs['eval']['ssim'] = logs['ssim'].cpu().numpy()
 
-        if self.hparams.val_only and self.hparams.warp:
-            logs['depth'] = rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)
-            logs['pose'] = batch['pose']
-            err = (rgb_pred - rgb_gt)**2
-            err = rearrange(err.cpu().numpy(), '1 c h w -> h w c', h=h)
-            logs['err'] = err.mean(-1)
+        # if self.hparams.val_only and self.hparams.warp:
+        #     logs['depth'] = rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)
+        #     logs['pose'] = batch['pose']
+        #     err = (rgb_pred - rgb_gt)**2
+        #     err = rearrange(err.cpu().numpy(), '1 c h w -> h w c', h=h)
+        #     logs['err'] = err.mean(-1)
 
 
         torch.cuda.empty_cache()
@@ -253,6 +258,35 @@ class NeRFSystem(LightningModule):
             self.val_lpips.reset()
             logs['lpips'] = (score1+score2).mean()
             outputs['eval']['lpips'] = logs['lpips'].cpu().numpy()
+
+            ###################################################
+            #             warp depth to ref cam
+            ###################################################
+
+            if self.hparams.warp:
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                depth = rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)
+                results['warpd'] = torch.zeros_like(depth)
+                if not batch['img_idxs'] == self.hparams.ref_cam:
+                    tdepth = depth  # numpy
+                    ref_c2w = np.eye(4)
+                    ref_c2w[:3] = self.ref_pose.cpu().numpy()
+                    ref_w2c = torch.from_numpy(np.linalg.inv(ref_c2w))
+
+                    tgt_c2w = np.eye(4)
+                    tgt_c2w[:3] = batch['pose'].cpu().numpy()
+                    tgt_w2c = torch.from_numpy(np.linalg.inv(tgt_c2w))
+
+                    rcams = {'pose': ref_w2c,  # 4x4
+                             'K': self.K}  # 4x4
+                    tcams = {'pose': tgt_w2c,  # 4x4
+                             'K': self.K}
+
+                    warpd1 = warp_tgt_to_ref1(tdepth, rcams, tcams, device)
+                    warpd2 = warp_tgt_to_ref2(tdepth, rcams, tcams, device)
+                    diffs = (warpd1-warpd2)**2
+                    print(f'warp differences: {diffs.sum()}')
+                    results['warpd'] = warpd1
 
         ###################################################
         #              MC-Dropout
@@ -272,7 +306,6 @@ class NeRFSystem(LightningModule):
             mcd_rgb_preds = torch.stack(mcd_rgb_preds,0) # n (h w) c
             results['mcd'] = mcd_rgb_preds.mean(-1).var(0) # (h w) c
             close_dropout(self.model.rgb_net)
-        ###################################################
 
         if not self.hparams.no_save_test: # save test image to disk
             idx = batch['img_idxs']
@@ -294,11 +327,17 @@ class NeRFSystem(LightningModule):
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_gt.png'), rgb_gt)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), err2img(err.mean(-1)))
 
-            ########### save output_transient ##################
+            ########### save other outputs ##################
             if self.hparams.mcdropout:
                 mcd = rearrange(results['mcd'].cpu().numpy(), '(h w) -> h w', h=h)
                 outputs['data']['mcd'] = mcd
                 imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), err2img(mcd))
+
+            if self.hparams.warp:
+                warp_depth = results['warpd']
+                outputs['data']['warpd'] = warp_depth
+                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_to_{self.hparams.ref_cam:03d}_warpd.png'),
+                           depth2img(warp_depth.cpu().numpy()))
 
             ########### save outputs ##################
             if self.hparams.save_output:
@@ -323,67 +362,76 @@ class NeRFSystem(LightningModule):
             mean_lpips = all_gather_ddp_if_available(lpipss).mean()
             self.log('test/lpips_vgg', mean_lpips)
 
-        if self.hparams.warp:
+        # if self.hparams.warp:
+        #
+        #     # scale depth back and use the raw poses to do warp (nerf rendered by centered poses)
+        #     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        #     poses = torch.stack([x['pose'] for x in outputs])
+        #     depths = torch.stack([x['depth'] for x in outputs])
+        #     errs = torch.from_numpy(np.stack([x['err'] for x in outputs]))
+        #
+        #     N_views = depths.size(0)
+        #     # K = self.test_dataset.K
+        #
+        #     K = torch.eye(4)
+        #     K[:3,:3] = self.test_dataset.K.cpu()
+        #
+        #     # cams = {'K': K,
+        #     #         'poses': poses,
+        #     #         'raw_poses':raw_poses,
+        #     #         'scale':scale}
+        #
+        #     # pts3d = {'raw': self.test_dataset.raw_pts3d,
+        #     #          'center': self.test_dataset.pts3d}
+        #
+        #     # torch.save(cams, os.path.join(self.val_dir, f'cams.pth'))
+        #     # torch.save(depths, os.path.join(self.val_dir, f'depths.pth'))
+        #     # torch.save(errs, os.path.join(self.val_dir, f'errs.pth'))
+        #     # torch.save(pts3d, os.path.join(self.val_dir, f'pts3d.pth'))
+        #
+        #     warp_depths = []
+        #     warp_depths += [None]
+        #     for img_id in trange(1, N_views): # warp depth 0 to other views
+        #         tgt_depth = depths[0]
+        #
+        #         ref_c2w = np.eye(4)
+        #         ref_c2w[:3] = poses[img_id].cpu().numpy()
+        #         ref_w2c = torch.from_numpy(np.linalg.inv(ref_c2w))
+        #
+        #         tgt_c2w = np.eye(4)
+        #         tgt_c2w[:3] = poses[0].cpu().numpy()
+        #         tgt_w2c = torch.from_numpy(np.linalg.inv(tgt_c2w))
+        #
+        #         ref_cams = {'pose': ref_w2c,# 4x4
+        #                     'K': K} # 4x4
+        #         tgt_cams = {'pose': tgt_w2c, # 4x4
+        #                     'K': K}
+        #
+        #         warp_depth = warp_tgt_to_ref(tgt_depth, ref_cams, tgt_cams, device)
+        #         imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpd.png'),
+        #                        depth2img(warp_depth.cpu().numpy()))
+        #         warp_depths += [warp_depth]
+        #
+        #         valid_mask = (warp_depth > 0)
+        #         warp_err = torch.zeros(warp_depth.size()).to(warp_depth)
+        #         depth_gt = depths[img_id,...].to(warp_depth)
+        #
+        #         warp_err[valid_mask] = (depth_gt[valid_mask] - warp_depth[valid_mask]) ** 2
+        #
+        #         valid_mask = valid_mask.cpu().numpy()
+        #         warp_err = warp_err.cpu().numpy()
+        #         rgb_err = errs[img_id]
+        #
+        #         roc_opt, auc_opt = compute_roc(rgb_err[valid_mask], rgb_err[valid_mask], intervals=20)
+        #         roc_est, auc_est = compute_roc(rgb_err[valid_mask], warp_err[valid_mask], intervals=20)
+        #         fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
+        #         plot_roc(roc_opt,roc_est,fig_name,opt_label='rgb_err',est_label='warp_err')
+        #         plot_roc(roc_opt, roc_est, fig_name, opt_label='rgb_err', est_label='warp_err')
+        #
+        #         imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpe.png'), err2img(warp_err))
 
-            # scale depth back and use the raw poses to do warp (nerf rendered by centered poses)
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            poses = torch.stack([x['pose'] for x in outputs])
-            depths = torch.stack([x['depth'] for x in outputs])
-            errs = torch.from_numpy(np.stack([x['err'] for x in outputs]))
-
-            N_views = depths.size(0)
-            K = self.test_dataset.K
-
-            # cams = {'K': K,
-            #         'poses': poses,
-            #         'raw_poses':raw_poses,
-            #         'scale':scale}
-
-            # pts3d = {'raw': self.test_dataset.raw_pts3d,
-            #          'center': self.test_dataset.pts3d}
-
-            # torch.save(cams, os.path.join(self.val_dir, f'cams.pth'))
-            # torch.save(depths, os.path.join(self.val_dir, f'depths.pth'))
-            # torch.save(errs, os.path.join(self.val_dir, f'errs.pth'))
-            # torch.save(pts3d, os.path.join(self.val_dir, f'pts3d.pth'))
-
-            for img_id in trange(1, N_views): # warp depth 0 to other views
-                tgt_depth = depths[0]
-
-                ref_c2w = np.eye(4)
-                ref_c2w[:3] = poses[img_id].cpu().numpy()
-                ref_w2c = torch.from_numpy(np.linalg.inv(ref_c2w)[:3])
-
-                tgt_c2w = np.eye(4)
-                tgt_c2w[:3] = poses[0].cpu().numpy()
-                tgt_w2c = torch.from_numpy(np.linalg.inv(tgt_c2w)[:3])
-
-                ref_cams = {'pose': ref_w2c,
-                            'K': K}
-                tgt_cams = {'pose': tgt_w2c,
-                            'K': K}
-
-                warped_depth = warp_tgt_to_ref(tgt_depth, ref_cams, tgt_cams, device)
-                imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpd.png'),
-                               depth2img(warped_depth.cpu().numpy()))
-
-                valid_mask = (warped_depth > 0)
-                warp_err = torch.zeros(warped_depth.size()).to(warped_depth)
-                depth_gt = depths[img_id,...].to(warped_depth)
-
-                warp_err[valid_mask] = (depth_gt[valid_mask] - warped_depth[valid_mask]) ** 2
-
-                valid_mask = valid_mask.cpu().numpy()
-                warp_err = warp_err.cpu().numpy()
-                rgb_err = errs[img_id]
-
-                roc_opt, auc_opt = compute_roc(rgb_err[valid_mask], rgb_err[valid_mask], intervals=20)
-                roc_est, auc_est = compute_roc(rgb_err[valid_mask], warp_err[valid_mask], intervals=20)
-                fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
-                plot_roc(roc_opt,roc_est,fig_name,opt_label='rgb_err',est_label='warp_err')
-                plot_roc(roc_opt, roc_est, fig_name, opt_label='rgb_err', est_label='warp_err')
-
-                imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpe.png'), err2img(warp_err))
+            # if self.hparams.save_output:
+            #     torch.save(warp_depths, os.path.join(self.val_dir, f'warpd.pth'))
 
     def get_progress_bar_dict(self):
         # don't show the version number
