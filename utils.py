@@ -1,6 +1,7 @@
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
+from tqdm import tqdm
 def enable_dropout(model,p=0.2):
     """ Function to enable the dropout layers during test-time """
     for m in model.modules():
@@ -130,6 +131,13 @@ def warp_tgt_to_ref(tgt_depth, ref_cams, tgt_cams, device='cpu'):
     proj_2d = torch.index_select(proj_2d, dim=0, index=inds)
     proj_2d = (proj_2d[:, 0] * width) + proj_2d[:, 1]
     proj_depth = torch.index_select(proj_depth, dim=0, index=inds).squeeze()
+
+    # find duplicate pixels, select the smallest depth
+    proj_2d_inverse, counts = proj_2d.unique(sorted=False,return_counts=True)
+    duplicates = proj_2d_inverse[counts>1]
+    for val in tqdm(duplicates):
+        min_depth = proj_depth[proj_2d==val].min()
+        proj_depth[proj_2d == val] = min_depth
 
     warped_depth = torch.zeros(height * width).to(proj_2d.device)
     warped_depth[proj_2d] = proj_depth
