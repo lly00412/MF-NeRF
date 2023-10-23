@@ -206,7 +206,7 @@ class NeRFSystem(LightningModule):
 
     def on_validation_start(self):
         torch.cuda.empty_cache()
-        if not self.hparams.no_save_test:
+        if (not self.hparams.no_save_test) or self.hparams.warp:
             self.val_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}'
             os.makedirs(self.val_dir, exist_ok=True)
 
@@ -218,8 +218,7 @@ class NeRFSystem(LightningModule):
         results = self(batch,split='test')
 
         logs = {}
-        logs['pose'] = batch['pose']
-        logs['raw_pose'] = batch['raw_pose']
+        # logs['raw_pose'] = batch['raw_pose']
         # compute each metric per image
         self.val_psnr(results['rgb'], rgb_gt)
         logs['psnr'] = self.val_psnr.compute()
@@ -233,6 +232,15 @@ class NeRFSystem(LightningModule):
         logs['ssim'] = self.val_ssim.compute()
         self.val_ssim.reset()
         outputs['eval']['ssim'] = logs['ssim'].cpu().numpy()
+
+        if self.hparams.val_only and self.hparams.warp:
+            logs['depth'] = rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)
+            logs['pose'] = batch['pose']
+            err = (rgb_pred - rgb_gt)**2
+            err = rearrange(err.cpu().numpy(), '1 c h w -> h w c', h=h)
+            logs['err'] = err.mean(-1)
+
+
         torch.cuda.empty_cache()
         if self.hparams.eval_lpips:
             self.val_lpips(torch.clip(rgb_pred[:,:,:,:w//2]*2-1, -1, 1),
@@ -275,13 +283,11 @@ class NeRFSystem(LightningModule):
             rgb_gt = rearrange(batch['rgb'].cpu().numpy(), '(h w) c -> h w c', h=h)
             outputs['data']['rgb_gt'] = rgb_gt
             err = (rgb_gt - rgb_pred)**2
-            logs['err'] = err.mean(-1)
             rgb_gt = (rgb_gt * 255).astype(np.uint8)
             ############################
 
             rgb_pred = (rgb_pred*255).astype(np.uint8)
             depth = rearrange(results['depth'].cpu().numpy(), '(h w) -> h w', h=h)
-            logs['depth'] = rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)
             outputs['data']['depth'] = depth
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_pred.png'), rgb_pred)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_d.png'), depth2img(depth))
@@ -295,11 +301,11 @@ class NeRFSystem(LightningModule):
                 imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), err2img(mcd))
 
             ########### save outputs ##################
-        if self.hparams.save_output:
-            idx = batch['img_idxs']
-            torch.save(outputs,os.path.join(self.val_dir, f'{idx:03d}.pth'))
+            if self.hparams.save_output:
+                idx = batch['img_idxs']
+                torch.save(outputs,os.path.join(self.val_dir, f'{idx:03d}.pth'))
 
-        del rgb_gt,rgb_pred,err,depth,results,outputs,batch
+            del rgb_gt,rgb_pred,err,depth,results,outputs,batch
 
         return logs
 
@@ -321,14 +327,12 @@ class NeRFSystem(LightningModule):
 
             # scale depth back and use the raw poses to do warp (nerf rendered by centered poses)
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            raw_poses = torch.stack([x['raw_pose'] for x in outputs])
             poses = torch.stack([x['pose'] for x in outputs])
             depths = torch.stack([x['depth'] for x in outputs])
             errs = torch.from_numpy(np.stack([x['err'] for x in outputs]))
 
             N_views = depths.size(0)
             K = self.test_dataset.K
-            scale = self.test_dataset.scale
 
             # cams = {'K': K,
             #         'poses': poses,
@@ -380,9 +384,6 @@ class NeRFSystem(LightningModule):
                 plot_roc(roc_opt, roc_est, fig_name, opt_label='rgb_err', est_label='warp_err')
 
                 imageio.imsave(os.path.join(self.val_dir, f'{0:03d}_to_{img_id:03d}_warpe.png'), err2img(warp_err))
-
-
-
 
     def get_progress_bar_dict(self):
         # don't show the version number
@@ -451,3 +452,4 @@ if __name__ == '__main__':
     end = time.time()
     runtime = time.strftime("%H:%M:%S", time.gmtime(end - start))
     print('Total runtime: {}'.format(runtime))
+

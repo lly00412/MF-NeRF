@@ -213,3 +213,42 @@ def create_spheric_poses(radius, mean_h, n_poses=120):
     for th in np.linspace(0, 2*np.pi, n_poses+1)[:-1]:
         spheric_poses += [spheric_pose(th, -np.pi/12, radius)]
     return np.stack(spheric_poses, 0)
+
+def get_center_and_diag(cam_centers):
+    cam_centers = np.hstack(cam_centers)
+    avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
+    center = avg_cam_center
+    dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
+    diagonal = np.max(dist)
+    return center.flatten(), diagonal
+
+def get_tf_cams(poses, target_radius=1.):
+    cam_centers = []
+    N_cams,_,_ = poses.shape
+    for cam_id in range(N_cams):
+        cam_centers.append(poses[cam_id][:3, 3:4])
+
+    center, diagonal = get_center_and_diag(cam_centers)
+    radius = diagonal * 1.1
+
+    translate = -center
+    scale = target_radius / radius
+
+    return translate, scale
+
+def transform_pose(c2w, translate, scale):
+    cam_center = c2w[:3, 3]
+    cam_center = (cam_center + translate) * scale
+    c2w[:3, 3] = cam_center
+    return c2w
+
+def normalize_cams(poses, pts3d, target_radius=1.):
+    # poses should be 4x4 c2w
+    translate, scale = get_tf_cams(poses, target_radius=target_radius)
+    pts3d = (pts3d + translate) * scale
+
+    N_cams, _, _ = poses.shape
+    for cam_id in range(N_cams):
+        poses[cam_id] = transform_pose(poses[cam_id], translate, scale)
+
+    return poses,pts3d

@@ -73,15 +73,16 @@ class ColmapDataset(BaseDataset):
         pts3d = np.array([pts3d[k].xyz for k in pts3d]) # (N, 3)
 
         # replace by https://github.com/Kai-46/nerfplusplus/blob/master/colmap_runner/normalize_cam_dict.py
-
         self.raw_poses = poses
         self.raw_pts3d = pts3d
-        self.poses, self.pts3d = center_poses(poses, pts3d)
 
-        scale = np.linalg.norm(self.poses[..., 3], axis=-1).min()
-        self.poses[..., 3] /= scale
-        self.pts3d /= scale
-        self.scale = scale
+        self.poses, self.pts3d = normalize_cams(poses,pts3d)
+        # self.poses, self.pts3d = center_poses(poses, pts3d)
+        #
+        # scale = np.linalg.norm(self.poses[..., 3], axis=-1).min()
+        # self.poses[..., 3] /= scale
+        # self.pts3d /= scale
+        # self.scale = scale
 
         self.rays = []
         if split == 'test_traj': # use precomputed test poses
