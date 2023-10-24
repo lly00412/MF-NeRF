@@ -288,22 +288,16 @@ class NeRFSystem(LightningModule):
             mcd_rgb_preds = []
             print('Start MC-Dropout...')
 
-            mcd_squre = 0
-            mcd = 0
             #TODO: E[(x-miu)^2] = E[x^2]-miu^2
             N_passes = self.hparams.n_passes
             for N in trange(N_passes):
                 mcd_results = self(batch,split='test')
-                #mcd_rgb_pred = rearrange(mcd_results['rgb'], '(h w) c -> 1 c h w', h=h) # torch (1,3,h,w)
-                # mcd_rgb_preds.append(mcd_results['rgb']) # (h w) c
-                mcd_squre += mcd_results['rgb']**2
-                mcd += mcd_results['rgb']
+                mcd_rgb_preds.append(mcd_results['rgb']) # (h w) c
+                # mcd += mcd_results['rgb']
+                # mcd_squre += mcd_results['rgb'] ** 2
                 del mcd_results
-            # mcd_rgb_preds = torch.stack(mcd_rgb_preds,0) # n (h w) c
-            # results['mcd'] = mcd_rgb_preds.mean(-1).var(0) # (h w)
-            mcd_squre /= N_passes
-            mcd /= N_passes
-            results['mcd'] = (mcd_squre - mcd**2).mean(-1) # (h w)
+            mcd_rgb_preds = torch.stack(mcd_rgb_preds,0) # n (h w) c
+            results['mcd'] = mcd_rgb_preds.mean(-1).var(0) # (h w)
             close_dropout(self.model.rgb_net)
 
         if self.hparams.plot_roc:
