@@ -81,6 +81,8 @@ def get_opts():
                         help='save the raw outputs')
     parser.add_argument('--save_video', action='store_true', default=False,
                         help='save the render video')
+    parser.add_argument('--plot_roc', action='store_true', default=False,
+                        help='whether to plot roc of all estimation')
 
     # mcdropout
     parser.add_argument("--mcdropout", action='store_true',

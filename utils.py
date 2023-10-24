@@ -66,7 +66,7 @@ def slim_ckpt(ckpt_path, save_poses=False):
 #     return warp_depth
 
 
-def warp_tgt_to_ref1(tgt_depth, ref_cams, tgt_cams, device='cpu'):
+def warp_tgt_to_ref(tgt_depth, ref_cams, tgt_cams, device='cpu'):
     torch.cuda.empty_cache()
     # warp tgt depth map to ref view
     height, width = tgt_depth.shape
@@ -151,7 +151,6 @@ def warp_tgt_to_ref1(tgt_depth, ref_cams, tgt_cams, device='cpu'):
 
     return warped_depth
 
-、
 
 
 def percentile(t: torch.tensor, q):
@@ -174,7 +173,7 @@ def percentile(t: torch.tensor, q):
     result = t.view(-1).kthvalue(k).values.item()
     return result
 
-def compute_roc(opt,est,intervals = 20):
+def compute_roc(opt,est,intervals = 20): # input numpy array
     ROC = []
     quants = [100. / intervals * t for t in range(1, intervals + 1)]
     thres = [np.percentile(est, q) for q in quants]
@@ -184,17 +183,22 @@ def compute_roc(opt,est,intervals = 20):
     AUC = np.trapz(ROC, dx=1. / intervals)
     return ROC,AUC
 
-def plot_roc(ROC_opt,ROC_est,fig_name, intervals = 20, opt_label='rgb_err',est_label='depth_err'):
+def plot_roc(ROC_dict,fig_name, is_ref_cam=False,opt_label='rgb_err',intervals = 20):
     quants = [100. / intervals * t for t in range(1, intervals + 1)]
     plt.figure()
+    plt.rcParams.update({'font.size': 20})
+    # plot opt
+    ROC_opt = ROC_dict.pop(opt_label)
     plt.plot(quants, ROC_opt, marker="^", markersize=8,  color='blue', label=opt_label)
-    plt.plot(quants, ROC_est, marker="o", markersize=8,  color='red', label=est_label)
+    if is_ref_cam:
+        ROC_dict.pop('warp_err')
+    for est in ROC_dict.keys():
+        plt.plot(quants, ROC_dict[est], marker="o", markersize=8, label=est)
     plt.xticks(quants)
     plt.xlabel('Sample Size(%)')
     plt.ylabel('Accumulative MSE')
     plt.legend()
     fig = plt.gcf()
     fig.set_size_inches(20, 8)
-    plt.rcParams.update({'font.size': 30})
     fig.savefig(fig_name)
     plt.close()
