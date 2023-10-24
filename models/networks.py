@@ -67,21 +67,28 @@ class NGP(nn.Module):
                 },
             )
 
-        self.rgb_net = \
-            tcnn.Network(
-                n_input_dims=32, n_output_dims=128,
-                network_config={
-                    "otype": "FullyFusedMLP",
-                    "activation": "ReLU",
-                    "output_activation": "ReLU",
-                    "n_neurons": hparams.rgb_channels,
-                    "n_hidden_layers": hparams.rgb_layers-1,
-                }
-            )
+        # self.rgb_net = \
+        #     tcnn.Network(
+        #         n_input_dims=32, n_output_dims=128,
+        #         network_config={
+        #             "otype": "FullyFusedMLP",
+        #             "activation": "ReLU",
+        #             "output_activation": "ReLU",
+        #             "n_neurons": hparams.rgb_channels,
+        #             "n_hidden_layers": hparams.rgb_layers-1,
+        #         }
+        #     )
 
-        self.rgb_out = torch.nn.Sequential(
+        self.rgb_net = torch.nn.Sequential(
+            nn.Linear(32, 128, bias=False),
+            nn.ReLU(),
+            # nn.Dropout(p=0),
+            nn.Linear(128, 128, bias=False),
+            nn.ReLU(),
+            nn.Linear(128, 128, bias=False),
+            nn.ReLU(),
             nn.Dropout(p=0),
-            nn.Linear(128, 3,bias=False)
+            nn.Linear(128, 3, bias=False),
         )
 
         if self.rgb_act == 'None': # rgb_net output is log-radiance
@@ -151,7 +158,7 @@ class NGP(nn.Module):
         d = d/torch.norm(d, dim=1, keepdim=True)
         d = self.dir_encoder((d+1)/2)
         rgbs = self.rgb_net(torch.cat([d, h], 1))
-        rgbs = self.rgb_out(rgbs)
+        # rgbs = self.rgb_out(rgbs)
         rgbs = self.rgb_act(rgbs)
 
         if self.rgb_act == 'None': # rgbs is log-radiance

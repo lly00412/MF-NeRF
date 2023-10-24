@@ -93,8 +93,26 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
 
         sigmas = torch.zeros(len(xyzs), device=device)
         rgbs = torch.zeros(len(xyzs), 3, device=device)
-        sigmas[valid_mask], _rgbs = model(xyzs[valid_mask], dirs[valid_mask], **kwargs)
-        rgbs[valid_mask] = _rgbs.float()
+
+        ################# TO SOLVE THE MEMORY PROBLEM #################
+        N_trunks = 4
+        valid_mask = list(torch.chunk(valid_mask, chunks=N_trunks))
+        xyzs = list(torch.chunk(xyzs, chunks=N_trunks))
+        dirs = list(torch.chunk(dirs, chunks=N_trunks))
+        sigmas = list(torch.chunk(sigmas, chunks=N_trunks))
+        rgbs = list(torch.chunk(rgbs, chunks=N_trunks))
+
+        for t_idx in range(N_trunks):
+            sigmas[t_idx][valid_mask[t_idx]], _rgbs = model(xyzs[t_idx][valid_mask[t_idx]],
+                                                            dirs[t_idx][valid_mask[t_idx]], **kwargs)
+            rgbs[t_idx][valid_mask[t_idx]] = _rgbs.float()
+
+        #############################################################
+        sigmas = torch.cat(sigmas)
+        rgbs = torch.cat(rgbs)
+
+        # sigmas[valid_mask], _rgbs = model(xyzs[valid_mask], dirs[valid_mask], **kwargs)
+        # rgbs[valid_mask] = _rgbs.float()
         sigmas = rearrange(sigmas, '(n1 n2) -> n1 n2', n2=N_samples)
         rgbs = rearrange(rgbs, '(n1 n2) c -> n1 n2 c', n2=N_samples)
 
