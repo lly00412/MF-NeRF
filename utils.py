@@ -2,6 +2,8 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
+import glob
+import os
 
 def enable_dropout(model,p=0.2):
     """ Function to enable the dropout layers during test-time """
@@ -202,3 +204,10 @@ def plot_roc(ROC_dict,fig_name, is_ref_cam=False,opt_label='rgb_err',intervals =
     fig.set_size_inches(20, 8)
     fig.savefig(fig_name)
     plt.close()
+
+def check_file_duplication(filename):
+    name, ext = os.path.splitext(filename)
+    filelist = glob.glob(f'{name}*{ext}')
+    if len(filelist)>0:
+        filename = f'{name}_v{len(filelist)}{ext}'
+    return filename

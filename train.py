@@ -61,7 +61,6 @@ def depth2img(depth):
                                   cv2.COLORMAP_TURBO)
     return depth_img
 
-
 class NeRFSystem(LightningModule):
     def __init__(self, hparams):
         super().__init__()
@@ -209,6 +208,9 @@ class NeRFSystem(LightningModule):
         if (not self.hparams.no_save_test) or self.hparams.warp:
             self.val_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}'
             os.makedirs(self.val_dir, exist_ok=True)
+        if self.hparams.save_output:
+            self.out_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}/output/'
+            os.makedirs(self.out_dir, exist_ok=True)
         # for warp
         if self.hparams.warp:
             ref_idx = self.hparams.ref_cam
@@ -308,10 +310,8 @@ class NeRFSystem(LightningModule):
             rgb_gt = rearrange(batch['rgb'].cpu(), '(h w) c -> h w c', h=h)
             rgb_err = (rgb_pred-rgb_gt)**2
             rgb_err = rgb_err.mean(-1).flatten().numpy()
-            ROC_dict['rgb_err'],AUC_dict['rgb_err'] = compute_roc(rgb_err,rgb_err)
             cam_flag = False
-            if self.hparams.mcdropout:
-                ROC_dict['mcd'], AUC_dict['mcd'] = compute_roc(rgb_err,results['mcd'].cpu().numpy())
+            mask_pt = False
             if self.hparams.warp:
                 ROC_dict['warp_err'], AUC_dict['warp_err'] = np.zeros(20), 0.
                 cam_flag = True
@@ -319,9 +319,21 @@ class NeRFSystem(LightningModule):
                     warp_depth = results['warpd'].cpu().flatten().numpy()
                     warp_err = results['warpe'].cpu().flatten().numpy()
                     valid_mask = (warp_depth>0)
-
                     ROC_dict['warp_err'], AUC_dict['warp_err'] = compute_roc(rgb_err[valid_mask], warp_err[valid_mask])
                     cam_flag = False
+                    mask_pt = True
+            if self.hparams.mcdropout:
+                mcd = results['mcd'].cpu().numpy()
+                if mask_pt:
+                    ROC_dict['mcd'], AUC_dict['mcd'] = compute_roc(rgb_err[valid_mask],mcd[valid_mask])
+                else:
+                    ROC_dict['mcd'], AUC_dict['mcd'] = compute_roc(rgb_err, mcd)
+
+            # plot opt
+            if mask_pt:
+                ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(rgb_err[valid_mask], rgb_err[valid_mask])
+            else:
+                ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(rgb_err, rgb_err)
 
             logs['ROC'] = ROC_dict.copy()
             logs['AUC'] = AUC_dict.copy()
@@ -382,7 +394,8 @@ class NeRFSystem(LightningModule):
             ########### save outputs ##################
             if self.hparams.save_output:
                 idx = batch['img_idxs']
-                torch.save(outputs,os.path.join(self.val_dir, f'{idx:03d}.pth'))
+                out_file = check_file_duplication(os.path.join(self.out_dir, f'{idx:03d}.pth'))
+                torch.save(outputs,out_file)
 
             del rgb_gt,rgb_pred,err,depth,results,outputs,batch
 
