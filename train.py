@@ -17,6 +17,7 @@ from datasets.ray_utils import axisangle_to_R, get_rays
 from kornia.utils.grid import create_meshgrid3d
 from models.networks import NGP
 from models.rendering import render, MAX_SAMPLES
+from models.virtual_cam import GetVirtualCam
 
 # optimizer, losses
 from apex.optimizers import FusedAdam
@@ -218,6 +219,12 @@ class NeRFSystem(LightningModule):
             self.K = torch.eye(4)
             self.K[:3, :3] = self.test_dataset.K.cpu().clone()
 
+    def render_virtual_cam(self,new_c2w, batch):
+        v_batch = {'pose': new_c2w.to(batch['pose']),
+                   'img_idxs': batch['img_idxs']}
+        v_results = self(v_batch, split='test')
+        return v_results
+
     def validation_step(self, batch, batch_nb):
         # print(batch.keys()) #dict_keys(['pose', 'img_idxs', 'rgb'])
         outputs = {'data':{},
@@ -253,33 +260,53 @@ class NeRFSystem(LightningModule):
             logs['lpips'] = (score1+score2).mean()
             outputs['eval']['lpips'] = logs['lpips'].cpu().numpy()
 
-            ###################################################
-            #             warp depth to ref cam
-            ###################################################
+        #################################################
+        #            render virtual camera
+        #################################################
+        if self.hparams.render_vcam:
+            idx = batch['img_idxs']
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            vargs = {'ref_c2w': batch['pose'].clone().cpu(),
+                     'K': self.test_dataset.K.clone().cpu(),
+                     'device': device,
+                     'ref_depth_map': rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)}
 
-            if self.hparams.warp:
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                depth = rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)
-                results['warpd'] = torch.zeros_like(depth)
-                results['warpe'] = torch.zeros_like(depth)
-                if not batch['img_idxs'] == self.hparams.ref_cam:
-                    tdepth = depth.clone()  # numpy
-                    ref_c2w = np.eye(4)
-                    ref_c2w[:3] = self.ref_pose.cpu().numpy().copy()
-                    ref_w2c = torch.from_numpy(np.linalg.inv(ref_c2w))
+            Vcam = GetVirtualCam(vargs)
+            thetas = [1,-1, 1, -1]
+            rot_ax = ['x','x','y','y']
+            warp_depths = []
+            counts = 0
+            for theta, ax in zip(thetas,rot_ax):
+                new_c2w = Vcam.get_near_c2w(batch['pose'].clone().cpu(), theta=theta, axis=ax)
+                rot_results = self.render_virtual_cam(new_c2w, batch)
+                rot_pred = rearrange(rot_results['rgb'].cpu().numpy(), '(h w) c -> h w c', h=h)
+                rot_pred = (rot_pred * 255).astype(np.uint8)
+                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_pred_rot{ax}{theta}.png'), rot_pred)
 
-                    tgt_c2w = np.eye(4)
-                    tgt_c2w[:3] = batch['pose'].cpu().numpy().copy()
-                    tgt_w2c = torch.from_numpy(np.linalg.inv(tgt_c2w))
+                rot_depth = rearrange(rot_results['depth'].cpu(), '(h w) -> h w', h=h)
+                warp_depth = warp_tgt_to_ref(rot_depth, batch['pose'], new_c2w, self.test_dataset.K,device).cpu()  # sorted
+                counts += (warp_depth>0)
+                warp_depths += [warp_depth]
 
-                    rcams = {'pose': ref_w2c,  # 4x4
-                             'K': self.K}  # 4x4
-                    tcams = {'pose': tgt_w2c,  # 4x4
-                             'K': self.K}
+            warp_depths = torch.stack(warp_depths)
+            warp_vars = warp_depths.var(0)
+            warp_u = torch.zeros_like(warp_vars)
+            warp_u[counts>0] = warp_vars[counts>0]
+            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'), err2img(warp_u.cpu().numpy()))
 
-                    results['warpd'] = warp_tgt_to_ref(tdepth, rcams, tcams, device).cpu() # sorted
-                    valid_mask = (results['warpd']>0)
-                    results['warpe'][valid_mask] = (depth[valid_mask] - results['warpd'][valid_mask])**2
+        ###################################################
+        #             warp depth to ref cam
+        ###################################################
+
+        if self.hparams.warp:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            depth = rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)
+            results['warpd'] = torch.zeros_like(depth)
+            results['warpe'] = torch.zeros_like(depth)
+            if not batch['img_idxs'] == self.hparams.ref_cam:
+                results['warpd'] = warp_tgt_to_ref(depth, self.ref_pose, batch['pose'], self.test_dataset.K,device).cpu() # sorted
+                valid_mask = (results['warpd']>0)
+                results['warpe'][valid_mask] = (depth[valid_mask] - results['warpd'][valid_mask])**2
 
         ###################################################
         #              MC-Dropout
@@ -312,6 +339,12 @@ class NeRFSystem(LightningModule):
             rgb_err = rgb_err.mean(-1).flatten().numpy()
             cam_flag = False
             mask_pt = False
+
+            mask = (counts>0).flatten().numpy()
+            warp_u = warp_u.cpu().flatten().numpy()
+            ROC_dict['warp_u'], AUC_dict['warp_u'] = compute_roc(rgb_err[mask], warp_u[mask])
+            mask_pt = True
+
             if self.hparams.warp:
                 ROC_dict['warp_err'], AUC_dict['warp_err'] = np.zeros(20), 0.
                 cam_flag = True
@@ -325,23 +358,23 @@ class NeRFSystem(LightningModule):
             if self.hparams.mcdropout:
                 mcd = results['mcd'].cpu().numpy()
                 if mask_pt:
-                    ROC_dict['mcd'], AUC_dict['mcd'] = compute_roc(rgb_err[valid_mask],mcd[valid_mask])
+                    ROC_dict['mcd'], AUC_dict['mcd'] = compute_roc(rgb_err[mask],mcd[mask])
                 else:
                     ROC_dict['mcd'], AUC_dict['mcd'] = compute_roc(rgb_err, mcd)
 
             # plot opt
             if mask_pt:
-                ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(rgb_err[valid_mask], rgb_err[valid_mask])
+                ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(rgb_err[mask], rgb_err[mask])
             else:
                 ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(rgb_err, rgb_err)
 
             logs['ROC'] = ROC_dict.copy()
             logs['AUC'] = AUC_dict.copy()
 
-            fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
+            fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc2.png')
             plot_roc(ROC_dict, fig_name, is_ref_cam=cam_flag, opt_label='rgb_err')
 
-            auc_log = os.path.join(self.val_dir, f'{img_id:03d}_auc.txt')
+            auc_log = os.path.join(self.val_dir, f'{img_id:03d}_auc2.txt')
             with open(auc_log, 'a') as f:
                 if self.hparams.mcdropout:
                     f.write(f'MC-Dropout params: \n')

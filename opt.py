@@ -68,7 +68,8 @@ def get_opts():
                         help='whether to warp depth from camera 0 to other val cameras')
     parser.add_argument('--ref_cam', type=int, default=0,
                         help='warp depth to which ref cam')
-
+    parser.add_argument('--render_vcam', action='store_true', default=False,
+                        help='whether to render from virtual cameras')
 
     # validation options
     parser.add_argument('--eval_lpips', action='store_true', default=False,
@@ -83,6 +84,7 @@ def get_opts():
                         help='save the render video')
     parser.add_argument('--plot_roc', action='store_true', default=False,
                         help='whether to plot roc of all estimation')
+
 
     # mcdropout
     parser.add_argument("--mcdropout", action='store_true',

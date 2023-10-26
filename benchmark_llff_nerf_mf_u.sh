@@ -1,6 +1,6 @@
 #!/bin/bash
 
-scenes=(fern flower fortress horns leaves orchids room trex)
+scenes=(trex)
 losses=l2
 export ROOT_DIR=/mnt/Data2/datasets/nerf_llff_data/
 export CKPT_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/nerf_llff/mfgrid_T20_levels_16_F_2_tables_8_rgb_2ly_128ch/${losses}/
@@ -35,9 +35,12 @@ do
     --L 16 --F 2 --T 20 --N_min 16 --grid MixedFeature --N_tables 8 \
     --rgb_channels 128 --rgb_layers 2 \
     --loss ${losses} \
-    --val_only --ckpt ${CKPT_DIR}/norm_cams/half_res/${SCENES}/epoch=19.ckpt \
     --mcdropout --n_passes 30 --p 0.2 \
-    --warp --ref_cam 0 \
-    --save_output \
-    --plot_roc
+    --val_only --ckpt ${CKPT_DIR}/norm_cams/half_res/${SCENES}/epoch=19.ckpt \
+    --render_vcam
   done
+#
+#    --mcdropout --n_passes 30 --p 0.2 \
+#    --warp --ref_cam 0 \
+#    --save_output \
+#    --plot_roc

@@ -68,13 +68,26 @@ def slim_ckpt(ckpt_path, save_poses=False):
 #     return warp_depth
 
 
-def warp_tgt_to_ref(tgt_depth, ref_cams, tgt_cams, device='cpu'):
+def warp_tgt_to_ref(tgt_depth, ref_c2w, tgt_c2w, K, device='cpu'):
+    depth_map = tgt_depth.clone()
+
+    K_homo = torch.eye(4)
+    K_homo[:3,:3] = K.clone().cpu()
+
+    rc2w = torch.eye(4)
+    rc2w[:3] = ref_c2w.clone().cpu()
+    rw2c = torch.inverse(rc2w)
+
+    tc2w = torch.eye(4)
+    tc2w[:3] = tgt_c2w.clone().cpu()
+    tw2c = torch.inverse(tc2w)
+
     torch.cuda.empty_cache()
     # warp tgt depth map to ref view
     height, width = tgt_depth.shape
     # grab intrinsics and extrinsics from reference view
-    P_ref = ref_cams['pose'].to(torch.float32) # 4x4
-    K_ref = ref_cams['K'].to(torch.float32) # 4x4
+    P_ref = rw2c.to(torch.float32) # 4x4
+    K_ref = K_homo.clone().to(torch.float32) # 4x4
 
     P_ref = P_ref.to(device)
     K_ref = K_ref.to(device)
@@ -86,11 +99,11 @@ def warp_tgt_to_ref(tgt_depth, ref_cams, tgt_cams, device='cpu'):
     z_ref = R_ref[2:3, :3].reshape(1, 1, 1, 3).repeat(height, width, 1, 1)
     C_ref = C_ref.reshape(1, 1, 3).repeat(height, width, 1)
 
-    depth_map = tgt_depth.to(device)  # h,w
+    depth_map = depth_map.to(device)  # h,w
 
     # get intrinsics and extrinsics from target view
-    P_tgt = tgt_cams['pose'].to(torch.float32)  #  4x4
-    K_tgt = tgt_cams['K'].to(torch.float32)  #  4x4
+    P_tgt = tw2c.to(torch.float32)  #  4x4
+    K_tgt = K_homo.clone().to(torch.float32)  #  4x4
 
     P_tgt = P_tgt.to(device)
     K_tgt = K_tgt.to(device)
@@ -211,4 +224,3 @@ def check_file_duplication(filename):
     if len(filelist)>0:
         filename = f'{name}_v{len(filelist)}{ext}'
     return filename
-
