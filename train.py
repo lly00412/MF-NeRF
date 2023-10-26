@@ -395,6 +395,7 @@ class NeRFSystem(LightningModule):
             if self.hparams.save_output:
                 idx = batch['img_idxs']
                 out_file = check_file_duplication(os.path.join(self.out_dir, f'{idx:03d}.pth'))
+                # out_file = os.path.join(self.out_dir, f'{idx:03d}.pth')
                 torch.save(outputs,out_file)
 
             del rgb_gt,rgb_pred,err,depth,results,outputs,batch
