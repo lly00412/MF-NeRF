@@ -274,8 +274,9 @@ class NeRFSystem(LightningModule):
             Vcam = GetVirtualCam(vargs)
             thetas = [1,-1, 1, -1]
             rot_ax = ['x','x','y','y']
-            warp_depths = []
+            warp_depths = [vargs['ref_depth_map']]
             counts = 0
+            warp_errs = []
             for theta, ax in zip(thetas,rot_ax):
                 new_c2w = Vcam.get_near_c2w(batch['pose'].clone().cpu(), theta=theta, axis=ax)
                 rot_results = self.render_virtual_cam(new_c2w, batch)
@@ -287,26 +288,22 @@ class NeRFSystem(LightningModule):
                 warp_depth = warp_tgt_to_ref(rot_depth, batch['pose'], new_c2w, self.test_dataset.K,device).cpu()  # sorted
                 counts += (warp_depth>0)
                 warp_depths += [warp_depth]
+                vaild_mask = (warp_depth>0)
+                _warp_err = (vargs['ref_depth_map']-warp_depth)**2
+                warp_err = torch.zeros_like(_warp_err)
+                warp_err[vaild_mask] = _warp_err[vaild_mask]
+                warp_errs += [warp_err]
 
             warp_depths = torch.stack(warp_depths)
-            warp_vars = warp_depths.var(0)
-            warp_u = torch.zeros_like(warp_vars)
-            warp_u[counts>0] = warp_vars[counts>0]
+            warp_sigmas = warp_depths.std(0)
+            warp_u = torch.zeros_like(warp_sigmas)
+            warp_u[counts>0] = warp_sigmas[counts>0]
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'), err2img(warp_u.cpu().numpy()))
 
-        ###################################################
-        #             warp depth to ref cam
-        ###################################################
+            warp_errs = torch.stack(warp_errs)
+            warp_err_avg = warp_errs.mean(0)
+            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpe.png'), err2img(warp_err_avg.cpu().numpy()))
 
-        if self.hparams.warp:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            depth = rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)
-            results['warpd'] = torch.zeros_like(depth)
-            results['warpe'] = torch.zeros_like(depth)
-            if not batch['img_idxs'] == self.hparams.ref_cam:
-                results['warpd'] = warp_tgt_to_ref(depth, self.ref_pose, batch['pose'], self.test_dataset.K,device).cpu() # sorted
-                valid_mask = (results['warpd']>0)
-                results['warpe'][valid_mask] = (depth[valid_mask] - results['warpd'][valid_mask])**2
 
         ###################################################
         #              MC-Dropout
@@ -340,31 +337,22 @@ class NeRFSystem(LightningModule):
             cam_flag = False
             mask_pt = False
 
-            mask = (counts>0).flatten().numpy()
-            warp_u = warp_u.cpu().flatten().numpy()
-            ROC_dict['warp_u'], AUC_dict['warp_u'] = compute_roc(rgb_err[mask], warp_u[mask])
-            mask_pt = True
+            if self.hparams.render_vcam:
+                warp_u = warp_u.cpu().flatten().numpy()
+                ROC_dict['warp_u'], AUC_dict['warp_u'] = compute_roc(rgb_err, warp_u)
+                ROC_dict['warp_e'], AUC_dict['warp_e'] = compute_roc(rgb_err, warp_u)
+                mask_pt = True
 
-            if self.hparams.warp:
-                ROC_dict['warp_err'], AUC_dict['warp_err'] = np.zeros(20), 0.
-                cam_flag = True
-                if not img_id == self.hparams.ref_cam:
-                    warp_depth = results['warpd'].cpu().flatten().numpy()
-                    warp_err = results['warpe'].cpu().flatten().numpy()
-                    valid_mask = (warp_depth>0)
-                    ROC_dict['warp_err'], AUC_dict['warp_err'] = compute_roc(rgb_err[valid_mask], warp_err[valid_mask])
-                    cam_flag = False
-                    mask_pt = True
             if self.hparams.mcdropout:
                 mcd = results['mcd'].cpu().numpy()
                 if mask_pt:
-                    ROC_dict['mcd'], AUC_dict['mcd'] = compute_roc(rgb_err[mask],mcd[mask])
+                    ROC_dict['mcd'], AUC_dict['mcd'] = compute_roc(rgb_err,mcd)
                 else:
                     ROC_dict['mcd'], AUC_dict['mcd'] = compute_roc(rgb_err, mcd)
 
             # plot opt
             if mask_pt:
-                ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(rgb_err[mask], rgb_err[mask])
+                ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(rgb_err, rgb_err)
             else:
                 ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(rgb_err, rgb_err)
 
@@ -415,15 +403,6 @@ class NeRFSystem(LightningModule):
                 outputs['data']['mcd'] = mcd
                 imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), err2img(mcd))
 
-            if self.hparams.warp:
-                warp_depth = results['warpd']
-                outputs['data']['warpd'] = warp_depth
-                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_to_{self.hparams.ref_cam:03d}_warpd.png'),
-                           depth2img(warp_depth.cpu().numpy()))
-                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_to_{self.hparams.ref_cam:03d}_warpe.png'),
-                               err2img(results['warpe'].cpu().numpy()))
-
-
             ########### save outputs ##################
             if self.hparams.save_output:
                 idx = batch['img_idxs']
@@ -458,18 +437,16 @@ class NeRFSystem(LightningModule):
                 ROCs['mcd']= np.stack([x['ROC']['mcd'] for x in outputs]).mean(0)
                 AUCs['mcd'] = np.array([x['AUC']['mcd'] for x in outputs]).mean(0)
 
-            if self.hparams.warp:
-                ROCs['warp_err']= np.stack([x['ROC']['warp_err'] for x in outputs])
-                ROCs['warp_err'] = np.delete(ROCs['warp_err'],self.hparams.ref_cam,axis=0)
-                ROCs['warp_err'] = ROCs['warp_err'].mean(0)
-                AUCs['warp_err'] = np.array([x['AUC']['warp_err'] for x in outputs])
-                AUCs['warp_err'] = np.delete(AUCs['warp_err'], self.hparams.ref_cam, axis=0)
-                AUCs['warp_err'] = AUCs['warp_err'].mean(0)
+            if self.hparams.render_vcam:
+                ROCs['warp_u'] = np.stack([x['ROC']['warp_u'] for x in outputs]).mean(0)
+                AUCs['warp_u'] = np.array([x['AUC']['warp_u'] for x in outputs]).mean(0)
+                ROCs['warp_e'] = np.stack([x['ROC']['warp_e'] for x in outputs]).mean(0)
+                AUCs['warp_e'] = np.array([x['AUC']['warp_e'] for x in outputs]).mean(0)
 
-            fig_name = os.path.join(self.val_dir, f'scene_avg_roc.png')
+            fig_name = os.path.join(self.val_dir, f'scene_avg_roc2.png')
             plot_roc(ROCs, fig_name, opt_label='rgb_err')
 
-            auc_log = os.path.join(self.val_dir, f'scene_avg_auc.txt')
+            auc_log = os.path.join(self.val_dir, f'scene_avg_auc2.txt')
             with open(auc_log, 'a') as f:
                 if self.hparams.mcdropout:
                     f.write(f'MC-Dropout params: \n')

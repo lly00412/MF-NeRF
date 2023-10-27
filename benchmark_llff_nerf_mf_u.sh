@@ -37,7 +37,8 @@ do
     --loss ${losses} \
     --mcdropout --n_passes 30 --p 0.2 \
     --val_only --ckpt ${CKPT_DIR}/norm_cams/half_res/${SCENES}/epoch=19.ckpt \
-    --render_vcam
+    --render_vcam \
+    --plot_roc
   done
 #
 #    --mcdropout --n_passes 30 --p 0.2 \
