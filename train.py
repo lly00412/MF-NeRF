@@ -301,7 +301,7 @@ class NeRFSystem(LightningModule):
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'), err2img(warp_u.cpu().numpy()))
 
             warp_errs = torch.stack(warp_errs)
-            warp_err_avg = warp_errs.mean(0)
+            warp_err_avg = warp_errs.std(0)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpe.png'), err2img(warp_err_avg.cpu().numpy()))
 
 
@@ -323,7 +323,7 @@ class NeRFSystem(LightningModule):
                 # mcd_squre += mcd_results['rgb'] ** 2
                 del mcd_results
             mcd_rgb_preds = torch.stack(mcd_rgb_preds,0) # n (h w) c
-            results['mcd'] = mcd_rgb_preds.mean(-1).var(0) # (h w)
+            results['mcd'] = mcd_rgb_preds.mean(-1).std(0) # (h w)
             close_dropout(self.model.rgb_net)
 
         if self.hparams.plot_roc:
