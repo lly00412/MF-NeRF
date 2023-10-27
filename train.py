@@ -301,7 +301,7 @@ class NeRFSystem(LightningModule):
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'), err2img(warp_u.cpu().numpy()))
 
             warp_errs = torch.stack(warp_errs)
-            warp_err_avg = warp_errs.std(0)
+            warp_err_avg = warp_errs.mean(0)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpe.png'), err2img(warp_err_avg.cpu().numpy()))
 
 
