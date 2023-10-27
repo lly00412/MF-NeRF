@@ -478,7 +478,7 @@ class NeRFSystem(LightningModule):
                 self.choice = np.random.choice(self.test_dataset.subs, self.hparams.n_view)
             else:
                 scores = torch.cat([x[self.hparams.pick_by].reshape(1) for x in outputs])
-                img_idxs = torch.tensor([x['img_idxs'] for x in outputs])
+                img_idxs = torch.from_numpy(self.test_dataset.subs)
                 topks = torch.topk(scores,self.hparams.n_view)
                 self.choice = img_idxs[topks.indices].tolist()
 
@@ -552,7 +552,7 @@ if __name__ == '__main__':
         hparams.train_img = view_choices+system.train_dataset.subs.tolist()
 
         system = NeRFSystem(hparams)
-        hparams.exp_name = os.path.join(hparams.exp_nam,hparams.pick_by)
+        hparams.exp_name = os.path.join(hparams.exp_name,hparams.pick_by)
 
         ckpt_cb = ModelCheckpoint(dirpath=f'ckpts/{hparams.dataset_name}/{hparams.exp_name}',
                                   filename='{epoch:d}',
