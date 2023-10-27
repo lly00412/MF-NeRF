@@ -136,6 +136,9 @@ class NeRFSystem(LightningModule):
             full_imgs = self.train_dataset.full
             train_subs = self.train_dataset.subs
             train_left = np.delete(np.arange(full_imgs), train_subs)
+            # random select 10 more and run the evaluation
+            if len(train_left) > 10:
+                train_left = np.random.choice(train_left,10)
             self.test_dataset = dataset(split='train',
                                          subs=train_left,
                                          seed=hparams.fewshot_seed,
