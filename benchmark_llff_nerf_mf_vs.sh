@@ -18,7 +18,11 @@ do
     --num_epochs 20 --batch_size 2048 --scale 16.0 --lr 2e-2 --eval_lpips \
     --L 16 --F 2 --T 20 --N_min 16 --grid MixedFeature --N_tables 8 \
     --rgb_channels 128 --rgb_layers 2 \
-    --loss ${losses}
+    --loss ${losses} \
+    --view_select --ckpt ${CKPT_DIR}/half_res/${SCENES}/epoch=19.ckpt \
+    --pick_by warp \
+    --n_view 4 \
+    --retrain
   done
 #
 #for SCENES in ${scenes[@]}

@@ -55,6 +55,8 @@ def get_opts():
                         help='fewshot_seed')
     parser.add_argument("--fewshot", type=int, default=0,
                         help='if 0 not using fewshot, else: using fewshot')
+    parser.add_argument("--train_img", type=int, default=None, nargs='+',
+                        help='only use training imgs listed here')
 
     # loss options
     parser.add_argument('--loss', type=str, default='l2',
@@ -70,6 +72,17 @@ def get_opts():
                         help='warp depth to which ref cam')
     parser.add_argument('--render_vcam', action='store_true', default=False,
                         help='whether to render from virtual cameras')
+
+    # view selection options
+    parser.add_argument('--view_select', action='store_true', default=False,
+                        help='whether run view selection process')
+    parser.add_argument('--pick_by', type=str, default='warp',
+                        choices=['random','warp', 'mcd'],
+                        help='select supplemental views by random / warping uncertainty / mcdropout')
+    parser.add_argument('--n_view', type=int, default=4,
+                        help='num of view selected from the rest of trainning set')
+    parser.add_argument('--retrain', action='store_true', default=False,
+                        help='whether to retrain by the training set')
 
     # validation options
     parser.add_argument('--eval_lpips', action='store_true', default=False,

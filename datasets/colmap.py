@@ -13,10 +13,11 @@ from .base import BaseDataset
 
 
 class ColmapDataset(BaseDataset):
-    def __init__(self, root_dir, split='train', downsample=1.0, fewshot=0,fewshot_seed=340,**kwargs):
-        super().__init__(root_dir, split, downsample,fewshot,fewshot_seed)
+    def __init__(self, root_dir, split='train', downsample=1.0, fewshot=0,fewshot_seed=340,subs=None,**kwargs):
+        super().__init__(root_dir, split, downsample,fewshot,fewshot_seed,subs)
         self.fewshot = fewshot
         self.seed = fewshot_seed
+        self.subs = subs
 
         self.read_intrinsics()
 
@@ -133,14 +134,23 @@ class ColmapDataset(BaseDataset):
                 self.poses = np.array([x for i, x in enumerate(self.poses) if i%8==0])
 
         if split=='train':
-            if self.fewshot>0:
+            if self.subs is not None:
+                self.full = len(img_paths)
+                img_paths = np.array(img_paths)[self.subs]
+                self.poses = self.poses[self.subs]
+                self.raw_poses = self.raw_poses[self.subs]
+
+            elif self.fewshot>0:
                 np.random.seed(self.seed)
-                subs = np.random.choice(len(img_paths), self.fewshot)
-                img_paths = np.array(img_paths)[subs]
-                self.poses = self.poses[subs]
-                self.raw_poses = self.raw_poses[subs]
+                self.full = len(img_paths)
+                self.subs = np.random.choice(len(img_paths), self.fewshot)
+                img_paths = np.array(img_paths)[self.subs]
+                self.poses = self.poses[self.subs]
+                self.raw_poses = self.raw_poses[self.subs]
 
         print(f'Loading {len(img_paths)} {split} images ...')
+        if split=='train':
+            print(f'Training imgs are {self.subs}.')
 
         for img_path in tqdm(img_paths):
             buf = [] # buffer for ray attributes: rgb, etc

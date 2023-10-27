@@ -6,12 +6,13 @@ class BaseDataset(Dataset):
     """
     Define length and sampling method
     """
-    def __init__(self, root_dir, split='train', downsample=1.0,fewshot=0,seed=340):
+    def __init__(self, root_dir, split='train', downsample=1.0,fewshot=0,seed=340,subs=None):
         self.root_dir = root_dir
         self.split = split
         self.downsample = downsample
         self.fewshot = fewshot
         self.seed = seed
+        self.subs = subs
 
     def read_intrinsics(self):
         raise NotImplementedError

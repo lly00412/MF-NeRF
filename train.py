@@ -119,15 +119,32 @@ class NeRFSystem(LightningModule):
         dataset = dataset_dict[self.hparams.dataset_name]
         kwargs = {'root_dir': self.hparams.root_dir,
                   'downsample': self.hparams.downsample}
-        self.train_dataset = dataset(split=self.hparams.split,
-                                     fewshot=self.hparams.fewshot,
-                                     seed=self.hparams.fewshot_seed,
-                                     **kwargs)
+        if self.hparams.train_img:
+            self.train_dataset = dataset(split=self.hparams.split,
+                                         subs=self.hparams.train_img,
+                                         seed=self.hparams.fewshot_seed,
+                                         **kwargs)
+        else:
+            self.train_dataset = dataset(split=self.hparams.split,
+                                         fewshot=self.hparams.fewshot,
+                                         seed=self.hparams.fewshot_seed,
+                                         **kwargs)
         self.train_dataset.batch_size = self.hparams.batch_size
         self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
 
-        self.test_dataset = dataset(split='test', **kwargs)
-        # self.hparams.N_vocab = self.train_dataset.N_vocab + self.test_dataset.N_vocab
+        if self.hparams.view_select:
+            full_imgs = self.train_dataset.full
+            train_subs = self.train_dataset.subs
+            train_left = np.delete(np.arange(full_imgs), train_subs)
+            self.test_dataset = dataset(split='train',
+                                         subs=train_left,
+                                         seed=hparams.fewshot_seed,
+                                         **kwargs)
+
+            self.test_dataset.split = 'test'
+        else:
+            self.test_dataset = dataset(split='test', **kwargs)
+            # self.hparams.N_vocab = self.train_dataset.N_vocab + self.test_dataset.N_vocab
 
     def configure_optimizers(self):
         # define additional parameters
@@ -233,6 +250,7 @@ class NeRFSystem(LightningModule):
         results = self(batch,split='test')
 
         logs = {}
+        logs['img_idxs'] = batch['img_idxs']
         # compute each metric per image
         self.val_psnr(results['rgb'], rgb_gt)
         logs['psnr'] = self.val_psnr.compute()
@@ -263,7 +281,7 @@ class NeRFSystem(LightningModule):
         #################################################
         #            render virtual camera
         #################################################
-        if self.hparams.render_vcam:
+        if self.hparams.render_vcam or self.hparams.pick_by=='warp':
             idx = batch['img_idxs']
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             vargs = {'ref_c2w': batch['pose'].clone().cpu(),
@@ -276,40 +294,32 @@ class NeRFSystem(LightningModule):
             rot_ax = ['x','x','y','y']
             warp_depths = [vargs['ref_depth_map']]
             counts = 0
-            warp_errs = []
             for theta, ax in zip(thetas,rot_ax):
                 new_c2w = Vcam.get_near_c2w(batch['pose'].clone().cpu(), theta=theta, axis=ax)
                 rot_results = self.render_virtual_cam(new_c2w, batch)
-                rot_pred = rearrange(rot_results['rgb'].cpu().numpy(), '(h w) c -> h w c', h=h)
-                rot_pred = (rot_pred * 255).astype(np.uint8)
-                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_pred_rot{ax}{theta}.png'), rot_pred)
+                #rot_pred = rearrange(rot_results['rgb'].cpu().numpy(), '(h w) c -> h w c', h=h)
+                #rot_pred = (rot_pred * 255).astype(np.uint8)
+                #imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_pred_rot{ax}{theta}.png'), rot_pred)
 
                 rot_depth = rearrange(rot_results['depth'].cpu(), '(h w) -> h w', h=h)
                 warp_depth = warp_tgt_to_ref(rot_depth, batch['pose'], new_c2w, self.test_dataset.K,device).cpu()  # sorted
                 counts += (warp_depth>0)
                 warp_depths += [warp_depth]
-                vaild_mask = (warp_depth>0)
-                _warp_err = (vargs['ref_depth_map']-warp_depth)**2
-                warp_err = torch.zeros_like(_warp_err)
-                warp_err[vaild_mask] = _warp_err[vaild_mask]
-                warp_errs += [warp_err]
 
             warp_depths = torch.stack(warp_depths)
             warp_sigmas = warp_depths.std(0)
             warp_u = torch.zeros_like(warp_sigmas)
             warp_u[counts>0] = warp_sigmas[counts>0]
-            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'), err2img(warp_u.cpu().numpy()))
+            # imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'), err2img(warp_u.cpu().numpy()))
 
-            warp_errs = torch.stack(warp_errs)
-            warp_err_avg = warp_errs.mean(0)
-            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpe.png'), err2img(warp_err_avg.cpu().numpy()))
-
+            warp_score = torch.median(warp_sigmas[counts>0].flatten())
+            logs['warp'] = warp_score.cpu()
 
         ###################################################
         #              MC-Dropout
         ###################################################
 
-        if self.hparams.mcdropout:
+        if self.hparams.mcdropout or self.hparams.pick_by=='mcd':
             enable_dropout(self.model.rgb_net,p=self.hparams.p)
             mcd_rgb_preds = []
             print('Start MC-Dropout...')
@@ -326,6 +336,9 @@ class NeRFSystem(LightningModule):
             results['mcd'] = mcd_rgb_preds.mean(-1).std(0) # (h w)
             close_dropout(self.model.rgb_net)
 
+            mcd_score = torch.median(results['mcd'].flatten())
+            logs['mcd'] = mcd_score.cpu()
+
         if self.hparams.plot_roc:
             img_id = batch['img_idxs']
             ROC_dict = {}
@@ -340,7 +353,6 @@ class NeRFSystem(LightningModule):
             if self.hparams.render_vcam:
                 warp_u = warp_u.cpu().flatten().numpy()
                 ROC_dict['warp_u'], AUC_dict['warp_u'] = compute_roc(rgb_err, warp_u)
-                ROC_dict['warp_e'], AUC_dict['warp_e'] = compute_roc(rgb_err, warp_u)
                 mask_pt = True
 
             if self.hparams.mcdropout:
@@ -359,10 +371,10 @@ class NeRFSystem(LightningModule):
             logs['ROC'] = ROC_dict.copy()
             logs['AUC'] = AUC_dict.copy()
 
-            fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc2.png')
+            fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
             plot_roc(ROC_dict, fig_name, is_ref_cam=cam_flag, opt_label='rgb_err')
 
-            auc_log = os.path.join(self.val_dir, f'{img_id:03d}_auc2.txt')
+            auc_log = os.path.join(self.val_dir, f'{img_id:03d}_auc.txt')
             with open(auc_log, 'a') as f:
                 if self.hparams.mcdropout:
                     f.write(f'MC-Dropout params: \n')
@@ -440,13 +452,11 @@ class NeRFSystem(LightningModule):
             if self.hparams.render_vcam:
                 ROCs['warp_u'] = np.stack([x['ROC']['warp_u'] for x in outputs]).mean(0)
                 AUCs['warp_u'] = np.array([x['AUC']['warp_u'] for x in outputs]).mean(0)
-                ROCs['warp_e'] = np.stack([x['ROC']['warp_e'] for x in outputs]).mean(0)
-                AUCs['warp_e'] = np.array([x['AUC']['warp_e'] for x in outputs]).mean(0)
 
-            fig_name = os.path.join(self.val_dir, f'scene_avg_roc2.png')
+            fig_name = os.path.join(self.val_dir, f'scene_avg_roc.png')
             plot_roc(ROCs, fig_name, opt_label='rgb_err')
 
-            auc_log = os.path.join(self.val_dir, f'scene_avg_auc2.txt')
+            auc_log = os.path.join(self.val_dir, f'scene_avg_auc.txt')
             with open(auc_log, 'a') as f:
                 if self.hparams.mcdropout:
                     f.write(f'MC-Dropout params: \n')
@@ -460,6 +470,14 @@ class NeRFSystem(LightningModule):
                     f.write(f' {key} auc =  {AUCs[key] * 100.:.4f}\n')
                 f.close()
 
+        if self.hparams.view_select:
+            if self.hparams.pick_by == 'random':
+                self.choice = np.random.choice(self.test_dataset.subs, self.hparams.n_view)
+            else:
+                scores = torch.cat([x[self.hparams.pick_by] for x in outputs])
+                img_idxs = torch.cat([x['img_idxs'] for x in outputs])
+                topks = torch.topk(scores,self.hparams.n_view)
+                self.choice = img_idxs[topks.indices].cpu().numpy()
 
     def get_progress_bar_dict(self):
         # don't show the version number
@@ -471,6 +489,18 @@ class NeRFSystem(LightningModule):
 if __name__ == '__main__':
     start = time.time()
     hparams = get_opts()
+
+    # view selection must run the validation first except for random choice
+    if hparams.view_select:
+        print('Starting view selection！')
+        hparams.val_only = True
+        if hparams.pick_by == 'random':
+            hparams.fewshot = hparams.fewshot+hparams.n_view
+            hparams.val_only = False
+            hparams.view_select = False
+            hparams.retrain = False
+            hparams.exp_name = os.path.join(hparams.exp_nam, hparams.pick_by)
+
     pytorch_lightning.seed_everything(hparams.seed)
     if hparams.val_only and (not hparams.ckpt_path):
         raise ValueError('You need to provide a @ckpt_path for validation!')
@@ -507,6 +537,46 @@ if __name__ == '__main__':
 
     trainer.fit(system)
     # trainer.fit(system, ckpt_path=hparams.ckpt_path)
+    view_choices = system.choice
+    select_time = time.time()
+    time_cost = time.strftime("%H:%M:%S", time.gmtime(select_time - start))
+    print(f'View selection by {hparams.pick_by}:  {view_choices}')
+    print('Time for selection process: {}'.format(time_cost))
+
+    if hparams.retrain:
+        hparams.val_only = False
+        hparams.view_select = False
+        hparams.train_img = view_choices
+
+        system = NeRFSystem(hparams)
+        hparams.exp_name = os.path.join(hparams.exp_nam,hparams.pick_by)
+
+        ckpt_cb = ModelCheckpoint(dirpath=f'ckpts/{hparams.dataset_name}/{hparams.exp_name}',
+                                  filename='{epoch:d}',
+                                  save_weights_only=True,
+                                  every_n_epochs=hparams.num_epochs,
+                                  save_on_train_epoch_end=True,
+                                  save_top_k=-1)
+        callbacks = [ckpt_cb, TQDMProgressBar(refresh_rate=1)]
+
+        os.makedirs(os.path.join(f"logs/{hparams.dataset_name}", hparams.exp_name), exist_ok=True)
+        logger = TensorBoardLogger(save_dir=f"logs/{hparams.dataset_name}",
+                                   name=hparams.exp_name,
+                                   default_hp_metric=False)
+
+        trainer = Trainer(max_epochs=hparams.num_epochs,
+                          check_val_every_n_epoch=hparams.num_epochs,
+                          callbacks=callbacks,
+                          logger=logger,
+                          enable_model_summary=False,
+                          accelerator='gpu',
+                          devices=hparams.num_gpus,
+                          strategy=DDPPlugin(find_unused_parameters=False)
+                          if hparams.num_gpus > 1 else None,
+                          num_sanity_val_steps=-1 if hparams.val_only else 0,
+                          precision=16)
+
+        trainer.fit(system)
 
     if not hparams.val_only: # save slimmed ckpt for the last epoch
         ckpt_ = \
