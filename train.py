@@ -474,7 +474,7 @@ class NeRFSystem(LightningModule):
             if self.hparams.pick_by == 'random':
                 self.choice = np.random.choice(self.test_dataset.subs, self.hparams.n_view)
             else:
-                scores = torch.cat([x[self.hparams.pick_by] for x in outputs])
+                scores = torch.cat([x[self.hparams.pick_by].reshape(1) for x in outputs])
                 img_idxs = torch.cat([x['img_idxs'] for x in outputs])
                 topks = torch.topk(scores,self.hparams.n_view)
                 self.choice = img_idxs[topks.indices].cpu().numpy()
