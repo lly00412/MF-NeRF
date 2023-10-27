@@ -478,9 +478,9 @@ class NeRFSystem(LightningModule):
                 self.choice = np.random.choice(self.test_dataset.subs, self.hparams.n_view)
             else:
                 scores = torch.cat([x[self.hparams.pick_by].reshape(1) for x in outputs])
-                img_idxs = torch.cat([x['img_idxs'] for x in outputs])
+                img_idxs = [x['img_idxs'] for x in outputs]
                 topks = torch.topk(scores,self.hparams.n_view)
-                self.choice = img_idxs[topks.indices].cpu().numpy()
+                self.choice = img_idxs[topks.indices.tolist()]
 
     def get_progress_bar_dict(self):
         # don't show the version number
@@ -549,7 +549,7 @@ if __name__ == '__main__':
     if hparams.retrain:
         hparams.val_only = False
         hparams.view_select = False
-        hparams.train_img = view_choices
+        hparams.train_img = view_choices+system.train_dataset.subs.tolist()
 
         system = NeRFSystem(hparams)
         hparams.exp_name = os.path.join(hparams.exp_nam,hparams.pick_by)
