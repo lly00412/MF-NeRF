@@ -129,6 +129,16 @@ class NeRFSystem(LightningModule):
                                          fewshot=self.hparams.fewshot,
                                          seed=self.hparams.fewshot_seed,
                                          **kwargs)
+
+        if self.hparams.pick_by == 'random':
+
+            train_full = np.arange(self.train_dataset.full)
+            np.random.seed(self.hparams.fewshot_seed)
+            ori_train = np.random.choice(train_full,self.hparams.fewshot-self.hparams.n_view,replace=False)
+            np.random.seed(self.hparams.fewshot_seed)
+            new_train = np.random.choice(self.train_dataset.full,self.hparams.fewshot,replace=False)
+            self.choice = np.delete(new_train,ori_train)
+
         self.train_dataset.batch_size = self.hparams.batch_size
         self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
 
@@ -138,7 +148,8 @@ class NeRFSystem(LightningModule):
             train_left = np.delete(np.arange(full_imgs), train_subs)
             # random select 10 more and run the evaluation
             if len(train_left) > 10:
-                train_left = np.random.choice(train_left,10)
+                np.random.seed(self.hparams.fewshot_seed)
+                train_left = np.random.choice(train_left,10,replace=False)
             self.test_dataset = dataset(split='train',
                                          subs=train_left,
                                          seed=hparams.fewshot_seed,
@@ -226,7 +237,10 @@ class NeRFSystem(LightningModule):
 
     def on_validation_start(self):
         torch.cuda.empty_cache()
-        if (not self.hparams.no_save_test) or self.hparams.warp:
+        if self.hparams.view_select:
+            self.hparams.exp_name = os.path.join(self.hparams.exp_name, 'view_select', self.hparams.pick_by)
+            self.hparams.no_save_test = True
+        if (not self.hparams.no_save_test) or self.hparams.view_select:
             self.val_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}'
             os.makedirs(self.val_dir, exist_ok=True)
         if self.hparams.save_output:
@@ -475,7 +489,7 @@ class NeRFSystem(LightningModule):
 
         if self.hparams.view_select:
             if self.hparams.pick_by == 'random':
-                self.choice = np.random.choice(self.test_dataset.subs, self.hparams.n_view)
+                self.choice = np.random.choice(self.test_dataset.subs, self.hparams.n_view, replace=False)
             else:
                 scores = torch.cat([x[self.hparams.pick_by].reshape(1) for x in outputs])
                 img_idxs = torch.from_numpy(self.test_dataset.subs)
@@ -493,16 +507,21 @@ if __name__ == '__main__':
     start = time.time()
     hparams = get_opts()
 
+    ori_exp_name = hparams.exp_name
+
     # view selection must run the validation first except for random choice
     if hparams.view_select:
         print('Starting view selection！')
+        hparams.exp_name = os.path.join(ori_exp_name, hparams.pick_by, 'vs')
         hparams.val_only = True
+        hparams.no_save_test = True
         if hparams.pick_by == 'random':
             hparams.fewshot = hparams.fewshot+hparams.n_view
             hparams.val_only = False
             hparams.view_select = False
             hparams.retrain = False
-            hparams.exp_name = os.path.join(hparams.exp_nam, hparams.pick_by)
+            hparams.exp_name = os.path.join(ori_exp_name, hparams.pick_by, 'retrain')
+            hparams.no_save_test = False
 
     pytorch_lightning.seed_everything(hparams.seed)
     if hparams.val_only and (not hparams.ckpt_path):
@@ -540,19 +559,30 @@ if __name__ == '__main__':
 
     trainer.fit(system)
     # trainer.fit(system, ckpt_path=hparams.ckpt_path)
-    view_choices = system.choice
-    select_time = time.time()
-    time_cost = time.strftime("%H:%M:%S", time.gmtime(select_time - start))
-    print(f'View selection by {hparams.pick_by}:  {view_choices}')
-    print('Time for selection process: {}'.format(time_cost))
+    if hparams.view_select:
+        view_choices = system.choice
+        select_time = time.time()
+        time_cost = time.strftime("%H:%M:%S", time.gmtime(select_time - start))
+        print(f'View selection by {hparams.pick_by}:  {view_choices}')
+        print('Time for selection process: {}'.format(time_cost))
+
+        view_select_log = os.path.join(system.val_dir, f'view_select.txt')
+        with open(view_select_log, 'a') as f:
+            f.write(f'View Select by: {hparams.pick_by}\n')
+            f.write(f'Selected views: {system.choice}\n')
+            f.write(f'Time for selection process: {time_cost}\n')
+            f.close()
 
     if hparams.retrain:
         hparams.val_only = False
         hparams.view_select = False
+        hparams.no_save_test = False
         hparams.train_img = view_choices+system.train_dataset.subs.tolist()
 
+        hparams.exp_name = os.path.join(ori_exp_name, hparams.pick_by, 'retrain')
+
         system = NeRFSystem(hparams)
-        hparams.exp_name = os.path.join(hparams.exp_name,hparams.pick_by)
+        system.hparams.pick_py = None
 
         ckpt_cb = ModelCheckpoint(dirpath=f'ckpts/{hparams.dataset_name}/{hparams.exp_name}',
                                   filename='{epoch:d}',
@@ -601,4 +631,5 @@ if __name__ == '__main__':
     end = time.time()
     runtime = time.strftime("%H:%M:%S", time.gmtime(end - start))
     print('Total runtime: {}'.format(runtime))
+
 

@@ -143,7 +143,7 @@ class ColmapDataset(BaseDataset):
             elif self.fewshot>0:
                 np.random.seed(self.seed)
                 self.full = len(img_paths)
-                self.subs = np.random.choice(len(img_paths), self.fewshot)
+                self.subs = np.random.choice(len(img_paths), self.fewshot, replace=False)
                 img_paths = np.array(img_paths)[self.subs]
                 self.poses = self.poses[self.subs]
                 self.raw_poses = self.raw_poses[self.subs]
