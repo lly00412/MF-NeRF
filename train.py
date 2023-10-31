@@ -131,13 +131,9 @@ class NeRFSystem(LightningModule):
                                          **kwargs)
 
         if self.hparams.pick_by == 'random':
-
-            train_full = np.arange(self.train_dataset.full)
-            np.random.seed(self.hparams.fewshot_seed)
-            ori_train = np.random.choice(train_full,self.hparams.fewshot-self.hparams.n_view,replace=False)
-            np.random.seed(self.hparams.fewshot_seed)
-            new_train = np.random.choice(self.train_dataset.full,self.hparams.fewshot,replace=False)
-            self.choice = np.delete(new_train,ori_train)
+            train_subs = self.train_dataset.subs
+            self.choice = train_subs[-self.hparams.n_view:]
+            print(self.choice)
 
         self.train_dataset.batch_size = self.hparams.batch_size
         self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
@@ -238,7 +234,6 @@ class NeRFSystem(LightningModule):
     def on_validation_start(self):
         torch.cuda.empty_cache()
         if self.hparams.view_select:
-            self.hparams.exp_name = os.path.join(self.hparams.exp_name, 'view_select', self.hparams.pick_by)
             self.hparams.no_save_test = True
         if (not self.hparams.no_save_test) or self.hparams.view_select:
             self.val_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}'
@@ -581,8 +576,9 @@ if __name__ == '__main__':
 
         hparams.exp_name = os.path.join(ori_exp_name, hparams.pick_by, 'retrain')
 
+        hparams.pick_by = None
+
         system = NeRFSystem(hparams)
-        system.hparams.pick_py = None
 
         ckpt_cb = ModelCheckpoint(dirpath=f'ckpts/{hparams.dataset_name}/{hparams.exp_name}',
                                   filename='{epoch:d}',
