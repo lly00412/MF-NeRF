@@ -245,7 +245,7 @@ def warp_tgt_to_ref_sparse(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, 
 
     # compute projected depth
     proj_depth = torch.sub(world_coords, C_ref).unsqueeze(-1)
-    proj_depth = torch.matmul(z_ref, proj_depth).reshape(height, width)
+    proj_depth = torch.matmul(z_ref, proj_depth)
     proj_depth = proj_depth.reshape(-1, 1)
 
     # mask out invalid indices
