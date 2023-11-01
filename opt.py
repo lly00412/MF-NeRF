@@ -76,8 +76,8 @@ def get_opts():
     # view selection options
     parser.add_argument('--view_select', action='store_true', default=False,
                         help='whether run view selection process')
-    parser.add_argument('--vs_samples', type=int, default=-1,
-                        help='number of sampling rays per view, -1 means rendering all rays')
+    parser.add_argument('--vs_sample_rate', type=float, default=1.,
+                        help='percentage of sampling rays per view, 1 means rendering all rays')
     parser.add_argument('--vs_batch_size', type=int, default=1024,
                         help='number of rays processing a batch for view selection')
     parser.add_argument('--pick_by', type=str, default='warp',

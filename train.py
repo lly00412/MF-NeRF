@@ -115,6 +115,8 @@ class NeRFSystem(LightningModule):
             kwargs['exp_step_factor'] = 1/256
         if self.hparams.use_exposure:
             kwargs['exposure'] = batch['exposure']
+        if self.hparams.view_select:
+            kwargs['to_cpu'] = True
 
         return render(self.model, rays_o, rays_d, **kwargs)
 
@@ -257,10 +259,9 @@ class NeRFSystem(LightningModule):
         v_results = self(v_batch, split='test')
         return v_results
 
-    def render_by_rays(self,ray_samples,batch,ray_batch_size):
-        rayloader = DataLoader(ray_samples, num_workers=8, batch_size=ray_batch_size, shuffle=False,
-                               pin_memory=True)
-
+    def render_by_rays(self,ray_samples,batch,ray_batch_size,n_worker=4,pin_m=True):
+        rayloader = DataLoader(ray_samples, num_workers=n_worker, batch_size=ray_batch_size, shuffle=False,
+                               pin_memory=pin_m)
         all_results = []
         for ray_ids in rayloader:
             sub_batch = batch
@@ -268,8 +269,11 @@ class NeRFSystem(LightningModule):
             sub_results = self(sub_batch, split='vs')
             all_results += [sub_results]
         results = {}
-        for k in all_results[0].keys():
-            results[k] = torch.cat([r[k].clone() for r in all_results])
+        for k in ['rgb','depth']:
+            if all_results[0][k].dim() == 0:
+                results[k] = torch.cat([r[k].clone().reshape(1) for r in all_results])
+            else:
+                results[k] = torch.cat([r[k].clone() for r in all_results])
         del all_results
         return results
     def validation_step(self, batch, batch_nb):
@@ -278,12 +282,12 @@ class NeRFSystem(LightningModule):
                    'eval':{}}
         rgb_gt = batch['rgb']
 
-        if self.view_select:
-            if self.hparams.vs_samples == -1:
-                self.hparams.vs_samples = self.test_dataset.img_wh[0] * self.test_dataset.img_wh[1]
+        if self.hparams.view_select:
+            total_rays = self.test_dataset.img_wh[0] * self.test_dataset.img_wh[1]
+            n_samples = int(self.hparams.vs_sample_rate*total_rays)
             #pix_idxs = np.random.choice(self.test_dataset.img_wh[0] * self.test_dataset.img_wh[1], self.hparams.vs_batch_size, replace=False)
             torch.random.manual_seed(self.hparams.fewshot_seed)
-            pix_idxs = torch.randperm(self.test_dataset.img_wh[0] * self.test_dataset.img_wh[1])[:self.hparams.vs_samples]
+            pix_idxs = torch.randperm(total_rays)[:n_samples]
             results = self.render_by_rays(pix_idxs,batch,self.hparams.vs_batch_size)
             results['pix_idxs'] = pix_idxs
             rgb_gt = rgb_gt[pix_idxs]
@@ -294,13 +298,13 @@ class NeRFSystem(LightningModule):
         logs = {}
         logs['img_idxs'] = batch['img_idxs']
         # compute each metric per image
-        self.val_psnr(results['rgb'], rgb_gt)
+        self.val_psnr(results['rgb'], rgb_gt.to(results['rgb']))
         logs['psnr'] = self.val_psnr.compute()
         self.val_psnr.reset()
         outputs['eval']['psnr'] = logs['psnr'].cpu().numpy()
 
         w, h = self.test_dataset.img_wh
-        if not self.view_select:
+        if not self.hparams.view_select:
             rgb_pred = rearrange(results['rgb'], '(h w) c -> 1 c h w', h=h)
             rgb_gt = rearrange(rgb_gt, '(h w) c -> 1 c h w', h=h)
             self.val_ssim(rgb_pred, rgb_gt)
@@ -320,8 +324,6 @@ class NeRFSystem(LightningModule):
                 self.val_lpips.reset()
                 logs['lpips'] = (score1 + score2).mean()
                 outputs['eval']['lpips'] = logs['lpips'].cpu().numpy()
-        else:
-            rgb_gt = rgb_gt[results['pix_idxs']]
 
         #################################################
         #            render virtual camera
@@ -340,13 +342,15 @@ class NeRFSystem(LightningModule):
                      'K': self.test_dataset.K.clone().cpu(),
                      'device': device,
                      'ref_depth_map': results['depth'].cpu(),
-                     'dense_map': not self.view_select,
-                     'pix_ids': results['pix_idxs']}
+                     'dense_map': not self.hparams.view_select,
+                     'pix_ids': results['pix_idxs'],
+                     'img_h': h,
+                     'img_w': w}
 
             Vcam = GetVirtualCam(vargs)
             thetas = [1,-1, 1, -1]
             rot_ax = ['x','x','y','y']
-            warp_depths = [vargs['ref_depth_map']]
+            warp_depths = [vargs['ref_depth_map'].cpu()]
             counts = 0
             for theta, ax in zip(thetas,rot_ax):
                 new_c2w = Vcam.get_near_c2w(batch['pose'].clone().cpu(), theta=theta, axis=ax)
@@ -372,17 +376,38 @@ class NeRFSystem(LightningModule):
                 ##################################################
                 #      render center cams and warp to the vcams --- has problems!!!!
                 ###################################################
-                # warp_depth = warp_func(results['depth'].cpu(), new_c2w, batch['pose'],
+                # _, out_pix_idxs = warp_func(results['depth'].cpu(), new_c2w, batch['pose'],
                 #                     self.test_dataset.K,
-                #                        results['pix_idxs'], (h,w), device).cpu()
+                #                        results['pix_idxs'], (h,w), device)
+                # mask = (out_pix_idxs>0)
+                # v_batch = {'pose': new_c2w.to(batch['pose']),
+                #            'img_idxs': batch['img_idxs']}
+                # v_results = self.render_by_rays(out_pix_idxs[mask], v_batch, self.hparams.vs_batch_size,n_worker=0,pin_m=False)
+                # warp_depth = torch.zeros(out_pix_idxs.shape)
+                # warp_depth[mask] = v_results['depth'].cpu()
                 # warp_depths += [warp_depth]
                 # counts += (warp_depth > 0)
 
+                warp_depth, out_pix_idxs = warp_func(results['depth'].cpu(), new_c2w, batch['pose'],
+                                            self.test_dataset.K,
+                                            results['pix_idxs'], (h, w), device)
+                warp_depth[out_pix_idxs == 0] = float('nan')
+                warp_depth = warp_depth.cpu()
+                warp_depths += [warp_depth]
+                counts += (out_pix_idxs > 0)
+
             warp_depths = torch.stack(warp_depths)
-            warp_sigmas = warp_depths.std(0)
+            warp_sigmas = np.nanstd(warp_depths.cpu().numpy(),axis=0)
+            warp_sigmas = torch.from_numpy(warp_sigmas)
+
             warp_u = torch.zeros_like(warp_sigmas)
+            counts = counts.cpu()
             warp_u[counts>0] = warp_sigmas[counts>0]
-            # imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'), err2img(warp_u.cpu().numpy()))
+
+            warp_img = torch.zeros(h*w).to(warp_sigmas)
+            warp_img[results['pix_idxs']] = warp_sigmas
+            warp_img = rearrange(warp_img.cpu().numpy(), '(h w) -> h w', h=h)
+            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'), err2img(warp_img))
 
             warp_score = torch.median(warp_sigmas[counts>0].flatten())
             logs['warp'] = warp_score.cpu()

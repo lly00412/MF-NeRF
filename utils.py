@@ -162,9 +162,9 @@ def warp_tgt_to_ref(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids=None, img_shape=Non
     warped_depth[proj_2d] = proj_depth
     warped_depth = warped_depth.reshape(height, width)
 
-    del proj_depth,proj_2d
+    del proj_depth
 
-    return warped_depth
+    return warped_depth, proj_2d
 
 def warp_tgt_to_ref_sparse(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, device='cpu'):
     torch.cuda.empty_cache()
@@ -254,10 +254,20 @@ def warp_tgt_to_ref_sparse(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, 
            torch.where(proj_2d[:, 1] < width, 1, 0) * \
            torch.where(proj_2d[:, 1] >= 0, 1, 0)
 
+    pixl_ids = proj_2d[:, 0] * width + proj_2d[:, 1]
+    pixl_ids[mask == 0] = 0
+    pixl_ids = pixl_ids.squeeze(-1)
+
     mask = mask.reshape(-1,1).to(proj_depth)
     warped_depth = proj_depth * mask  # (N_rays)
+    warped_depth = warped_depth.squeeze(-1)
 
-    return warped_depth
+    # proj_2d[:, 0] = torch.where(proj_2d[:, 0] >= height, height-1, proj_2d[:, 0])
+    # proj_2d[:, 0] = torch.where(proj_2d[:, 0] < 0, 0, proj_2d[:, 0])
+    # proj_2d[:, 1] = torch.where(proj_2d[:, 1] >= width, width-1, proj_2d[:, 1])
+    # proj_2d[:, 1] = torch.where(proj_2d[:, 1] < 0, 0, proj_2d[:, 1])
+
+    return warped_depth, pixl_ids.long()
 
 
 
