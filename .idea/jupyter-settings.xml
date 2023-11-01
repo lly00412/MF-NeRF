@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="JupyterPersistentConnectionParameters">
+    <option name="moduleParameters">
+      <map>
+        <entry key="$PROJECT_DIR$/.idea/MF-NeRF.iml">
+          <value>
+            <JupyterConnectionParameters>
+              <option name="argv" value="conda activate mf-nerf jupyter notebook --no-browser" />
+              <option name="managed" value="true" />
+              <option name="sdkName" value="Remote Python 3.8.18 (sftp://lchen39@155.246.167.6:22/home/lchen39/.conda/envs/mf-nerf/bin/python)" />
+            </JupyterConnectionParameters>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>

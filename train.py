@@ -95,6 +95,9 @@ class NeRFSystem(LightningModule):
         if split=='train':
             poses = self.poses[batch['img_idxs']]
             directions = self.directions[batch['pix_idxs']]
+        elif split=='vs':
+            poses = batch['pose'].unsqueeze(0).repeat(len(batch['pix_idxs']),1,1)
+            directions = self.directions[batch['pix_idxs']]
         else:
             poses = batch['pose']
             directions = self.directions
@@ -106,7 +109,7 @@ class NeRFSystem(LightningModule):
 
         rays_o, rays_d = get_rays(directions, poses)
 
-        kwargs = {'test_time': split!='train',
+        kwargs = {'test_time': split =='test',
                   'random_bg': self.hparams.random_bg}
         if self.hparams.scale > 0.5:
             kwargs['exp_step_factor'] = 1/256
@@ -254,12 +257,39 @@ class NeRFSystem(LightningModule):
         v_results = self(v_batch, split='test')
         return v_results
 
+    def render_by_rays(self,ray_samples,batch,ray_batch_size):
+        rayloader = DataLoader(ray_samples, num_workers=8, batch_size=ray_batch_size, shuffle=False,
+                               pin_memory=True)
+
+        all_results = []
+        for ray_ids in rayloader:
+            sub_batch = batch
+            sub_batch['pix_idxs'] = ray_ids
+            sub_results = self(sub_batch, split='vs')
+            all_results += [sub_results]
+        results = {}
+        for k in all_results[0].keys():
+            results[k] = torch.cat([r[k].clone() for r in all_results])
+        del all_results
+        return results
     def validation_step(self, batch, batch_nb):
         # print(batch.keys()) #dict_keys(['pose', 'img_idxs', 'rgb'])
         outputs = {'data':{},
                    'eval':{}}
         rgb_gt = batch['rgb']
-        results = self(batch,split='test')
+
+        if self.view_select:
+            if self.hparams.vs_samples == -1:
+                self.hparams.vs_samples = self.test_dataset.img_wh[0] * self.test_dataset.img_wh[1]
+            #pix_idxs = np.random.choice(self.test_dataset.img_wh[0] * self.test_dataset.img_wh[1], self.hparams.vs_batch_size, replace=False)
+            torch.random.manual_seed(self.hparams.fewshot_seed)
+            pix_idxs = torch.randperm(self.test_dataset.img_wh[0] * self.test_dataset.img_wh[1])[:self.hparams.vs_samples]
+            results = self.render_by_rays(pix_idxs,batch,self.hparams.vs_batch_size)
+            results['pix_idxs'] = pix_idxs
+            rgb_gt = rgb_gt[pix_idxs]
+        else:
+            results = self(batch,split='test')
+            results['pix_idxs'] = None
 
         logs = {}
         logs['img_idxs'] = batch['img_idxs']
@@ -269,26 +299,29 @@ class NeRFSystem(LightningModule):
         self.val_psnr.reset()
         outputs['eval']['psnr'] = logs['psnr'].cpu().numpy()
 
-        w, h = self.train_dataset.img_wh
-        rgb_pred = rearrange(results['rgb'], '(h w) c -> 1 c h w', h=h)
-        rgb_gt = rearrange(rgb_gt, '(h w) c -> 1 c h w', h=h)
-        self.val_ssim(rgb_pred, rgb_gt)
-        logs['ssim'] = self.val_ssim.compute()
-        self.val_ssim.reset()
-        outputs['eval']['ssim'] = logs['ssim'].cpu().numpy()
+        w, h = self.test_dataset.img_wh
+        if not self.view_select:
+            rgb_pred = rearrange(results['rgb'], '(h w) c -> 1 c h w', h=h)
+            rgb_gt = rearrange(rgb_gt, '(h w) c -> 1 c h w', h=h)
+            self.val_ssim(rgb_pred, rgb_gt)
+            logs['ssim'] = self.val_ssim.compute()
+            self.val_ssim.reset()
+            outputs['eval']['ssim'] = logs['ssim'].cpu().numpy()
 
-        torch.cuda.empty_cache()
-        if self.hparams.eval_lpips:
-            self.val_lpips(torch.clip(rgb_pred[:,:,:,:w//2]*2-1, -1, 1),
-                           torch.clip(rgb_gt[:,:,:,:w//2]*2-1, -1, 1))
-            score1 = self.val_lpips.compute()
-            self.val_lpips.reset()
-            self.val_lpips(torch.clip(rgb_pred[:, :, :, w//2 :] * 2 - 1, -1, 1),
-                           torch.clip(rgb_gt[:, :, :, w//2 :] * 2 - 1, -1, 1))
-            score2 = self.val_lpips.compute()
-            self.val_lpips.reset()
-            logs['lpips'] = (score1+score2).mean()
-            outputs['eval']['lpips'] = logs['lpips'].cpu().numpy()
+            torch.cuda.empty_cache()
+            if self.hparams.eval_lpips:
+                self.val_lpips(torch.clip(rgb_pred[:, :, :, :w // 2] * 2 - 1, -1, 1),
+                               torch.clip(rgb_gt[:, :, :, :w // 2] * 2 - 1, -1, 1))
+                score1 = self.val_lpips.compute()
+                self.val_lpips.reset()
+                self.val_lpips(torch.clip(rgb_pred[:, :, :, w // 2:] * 2 - 1, -1, 1),
+                               torch.clip(rgb_gt[:, :, :, w // 2:] * 2 - 1, -1, 1))
+                score2 = self.val_lpips.compute()
+                self.val_lpips.reset()
+                logs['lpips'] = (score1 + score2).mean()
+                outputs['eval']['lpips'] = logs['lpips'].cpu().numpy()
+        else:
+            rgb_gt = rgb_gt[results['pix_idxs']]
 
         #################################################
         #            render virtual camera
@@ -296,10 +329,19 @@ class NeRFSystem(LightningModule):
         if self.hparams.render_vcam or self.hparams.pick_by=='warp':
             idx = batch['img_idxs']
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            # vargs = {'ref_c2w': batch['pose'].clone().cpu(),
+            #          'K': self.test_dataset.K.clone().cpu(),
+            #          'device': device,
+            #          'ref_depth_map': rearrange(results['depth'].cpu(), '(h w) -> h w', h=h),
+            #          'pix_ids': None,
+            #          'img_h': self.test_dataset.img_wh[1],
+            #          'img_w': self.test_dataset.img_wh[0]}
             vargs = {'ref_c2w': batch['pose'].clone().cpu(),
                      'K': self.test_dataset.K.clone().cpu(),
                      'device': device,
-                     'ref_depth_map': rearrange(results['depth'].cpu(), '(h w) -> h w', h=h)}
+                     'ref_depth_map': results['depth'].cpu(),
+                     'dense_map': not self.view_select,
+                     'pix_ids': results['pix_idxs']}
 
             Vcam = GetVirtualCam(vargs)
             thetas = [1,-1, 1, -1]
@@ -308,15 +350,33 @@ class NeRFSystem(LightningModule):
             counts = 0
             for theta, ax in zip(thetas,rot_ax):
                 new_c2w = Vcam.get_near_c2w(batch['pose'].clone().cpu(), theta=theta, axis=ax)
-                rot_results = self.render_virtual_cam(new_c2w, batch)
+
+                if not self.hparams.view_select:
+                    warp_func = warp_tgt_to_ref
+                else:
+                    warp_func = warp_tgt_to_ref_sparse
+
+                ##################################################
+                #      render vcams and warp to the center cam
+                ###################################################
+                # rot_results = self.render_virtual_cam(new_c2w, batch)
                 #rot_pred = rearrange(rot_results['rgb'].cpu().numpy(), '(h w) c -> h w c', h=h)
                 #rot_pred = (rot_pred * 255).astype(np.uint8)
                 #imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_pred_rot{ax}{theta}.png'), rot_pred)
 
-                rot_depth = rearrange(rot_results['depth'].cpu(), '(h w) -> h w', h=h)
-                warp_depth = warp_tgt_to_ref(rot_depth, batch['pose'], new_c2w, self.test_dataset.K,device).cpu()  # sorted
-                counts += (warp_depth>0)
-                warp_depths += [warp_depth]
+                # rot_depth = rearrange(rot_results['depth'].cpu(), '(h w) -> h w', h=h)
+                # warp_depth = warp_tgt_to_ref(rot_depth, batch['pose'], new_c2w, self.test_dataset.K,device).cpu()  # sorted
+                # counts += (warp_depth>0)
+                # warp_depths += [warp_depth]
+
+                ##################################################
+                #      render center cams and warp to the vcams --- has problems!!!!
+                ###################################################
+                # warp_depth = warp_func(results['depth'].cpu(), new_c2w, batch['pose'],
+                #                     self.test_dataset.K,
+                #                        results['pix_idxs'], (h,w), device).cpu()
+                # warp_depths += [warp_depth]
+                # counts += (warp_depth > 0)
 
             warp_depths = torch.stack(warp_depths)
             warp_sigmas = warp_depths.std(0)
@@ -339,7 +399,10 @@ class NeRFSystem(LightningModule):
             #TODO: E[(x-miu)^2] = E[x^2]-miu^2
             N_passes = self.hparams.n_passes
             for N in trange(N_passes):
-                mcd_results = self(batch,split='test')
+                if self.hparams.view_select:
+                    mcd_results = self.render_by_rays(results['pix_idxs'],batch,self.hparams.vs_batch_size)
+                else:
+                    mcd_results = self(batch,split='test')
                 mcd_rgb_preds.append(mcd_results['rgb']) # (h w) c
                 # mcd += mcd_results['rgb']
                 # mcd_squre += mcd_results['rgb'] ** 2
@@ -443,14 +506,15 @@ class NeRFSystem(LightningModule):
         mean_psnr = all_gather_ddp_if_available(psnrs).mean()
         self.log('test/psnr', mean_psnr, True)
 
-        ssims = torch.stack([x['ssim'] for x in outputs])
-        mean_ssim = all_gather_ddp_if_available(ssims).mean()
-        self.log('test/ssim', mean_ssim)
+        if not self.hparams.view_select:
+            ssims = torch.stack([x['ssim'] for x in outputs])
+            mean_ssim = all_gather_ddp_if_available(ssims).mean()
+            self.log('test/ssim', mean_ssim)
 
-        if self.hparams.eval_lpips:
-            lpipss = torch.stack([x['lpips'] for x in outputs])
-            mean_lpips = all_gather_ddp_if_available(lpipss).mean()
-            self.log('test/lpips_vgg', mean_lpips)
+            if self.hparams.eval_lpips:
+                lpipss = torch.stack([x['lpips'] for x in outputs])
+                mean_lpips = all_gather_ddp_if_available(lpipss).mean()
+                self.log('test/lpips_vgg', mean_lpips)
 
         if self.hparams.plot_roc:
             ROCs = {}

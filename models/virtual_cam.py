@@ -1,7 +1,6 @@
 import numpy as np
-import torch.nn as nn
-import torch.nn.functional as F
 import torch
+from einops import rearrange
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -12,9 +11,21 @@ class GetVirtualCam:
         self.K = kwargs['K'] # 3x3
         self.ref_depth_map = kwargs['ref_depth_map']
         self.device = kwargs['device']
+        self.pixl_ids = kwargs['pix_ids']
+        self.img_h = kwargs['img_h']
+        self.img_w = kwargs['img_w']
+        if kwargs.get('dense_map', False):
+            self.ref_depth_map = rearrange(self.ref_depth_map, '(h w) -> h w', h=self.img_h),
+
         self.scene_center = self.get_scene_center()
 
     def get_scene_center(self):
+        if self.ref_depth_map.ndim < 2:
+            return self.get_scene_center_sparse()
+        else:
+            return self.get_scene_center_dense()
+
+    def get_scene_center_dense(self):
         depth_map = self.ref_depth_map.clone().to(self.device)
         height, width = self.ref_depth_map.shape
 
@@ -43,6 +54,41 @@ class GetVirtualCam:
         world_coords = world_coords * depth_map.reshape(1, -1)
         world_coords = world_coords + bwd_trans.reshape(3, 1)
         world_coords = torch.movedim(world_coords, 0, 1) # (h w) 3
+
+        scene_center = world_coords.mean(0)
+
+        return scene_center.cpu()
+
+    def get_scene_center_sparse(self):
+        depth_map = self.ref_depth_map.clone().to(self.device)
+        height, width = self.img_h, self.img_w
+
+        ref_c2w = torch.eye(4)
+        ref_c2w[:3] = self.ref_c2w.clone().cpu()
+        ref_c2w = ref_c2w.to(device=self.device, dtype=torch.float32)
+        ref_w2c = torch.inverse(ref_c2w)
+
+        K = torch.eye(4)
+        K[:3, :3] = self.K.clone().cpu()
+        K = K.to(ref_w2c)
+
+        bwd_proj = torch.matmul(ref_c2w, torch.inverse(K)).to(torch.float32)
+        bwd_rot = bwd_proj[:3, :3]
+        bwd_trans = bwd_proj[:3, 3:4]
+
+        y, x = torch.meshgrid([torch.arange(0, height, dtype=torch.float32),
+                               torch.arange(0, width, dtype=torch.float32)],
+                              indexing='ij')
+        y, x = y.contiguous(), x.contiguous()
+        y, x = y.reshape(height * width), x.reshape(height * width)
+        homog = torch.stack((x, y, torch.ones_like(x))).to(bwd_rot)
+        homog = homog[...,self.pixl_ids]
+
+        # get world coords
+        world_coords = torch.matmul(bwd_rot, homog)
+        world_coords = world_coords * depth_map.reshape(1, -1)
+        world_coords = world_coords + bwd_trans.reshape(3, 1)
+        world_coords = torch.movedim(world_coords, 0, 1) # (n_rays) 3
 
         scene_center = world_coords.mean(0)
 

@@ -68,7 +68,7 @@ def slim_ckpt(ckpt_path, save_poses=False):
 #     return warp_depth
 
 
-def warp_tgt_to_ref(tgt_depth, ref_c2w, tgt_c2w, K, device='cpu'):
+def warp_tgt_to_ref(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids=None, img_shape=None,device='cpu'):
     depth_map = tgt_depth.clone()
 
     K_homo = torch.eye(4)
@@ -165,6 +165,100 @@ def warp_tgt_to_ref(tgt_depth, ref_c2w, tgt_c2w, K, device='cpu'):
     del proj_depth,proj_2d
 
     return warped_depth
+
+def warp_tgt_to_ref_sparse(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, device='cpu'):
+    torch.cuda.empty_cache()
+
+    depth_map = tgt_depth.clone()  # (N_rays)
+    height, width = img_shape
+    n_rays = depth_map.shape[0]
+
+    K_homo = torch.eye(4)
+    K_homo[:3,:3] = K.clone().cpu()
+
+    rc2w = torch.eye(4)
+    rc2w[:3] = ref_c2w.clone().cpu()
+    rw2c = torch.inverse(rc2w)
+
+    tc2w = torch.eye(4)
+    tc2w[:3] = tgt_c2w.clone().cpu()
+    tw2c = torch.inverse(tc2w)
+
+    # warp tgt depth map to ref view
+    # grab intrinsics and extrinsics from reference view
+    P_ref = rw2c.to(torch.float32) # 4x4
+    K_ref = K_homo.clone().to(torch.float32) # 4x4
+
+    P_ref = P_ref.to(device)
+    K_ref = K_ref.to(device)
+
+    R_ref = P_ref[:3, :3] # 3x3
+    t_ref = P_ref[:3, 3:4] # 3x1
+
+    C_ref = torch.matmul(-R_ref.transpose(0, 1), t_ref)
+    # z_ref = R_ref[2:3, :3].reshape(1, 1, 1, 3).repeat(height, width, 1, 1)
+    # C_ref = C_ref.reshape(1, 1, 3).repeat(height, width, 1)
+
+    z_ref = R_ref[2:3, :3].reshape(1, 1, 3).repeat(n_rays, 1, 1)
+    C_ref = C_ref.reshape(1, 3).repeat(n_rays, 1)
+
+
+    depth_map = depth_map.to(device)  # h,w
+
+    # get intrinsics and extrinsics from target view
+    P_tgt = tw2c.to(torch.float32)  #  4x4
+    K_tgt = K_homo.clone().to(torch.float32)  #  4x4
+
+    P_tgt = P_tgt.to(device)
+    K_tgt = K_tgt.to(device)
+
+    bwd_proj = torch.matmul(torch.inverse(P_tgt), torch.inverse(K_tgt)).to(torch.float32)
+    fwd_proj = torch.matmul(K_ref, P_ref).to(torch.float32)
+    bwd_rot = bwd_proj[:3, :3]
+    bwd_trans = bwd_proj[:3, 3:4]
+    proj = torch.matmul(fwd_proj, bwd_proj)
+    rot = proj[:3, :3]
+    trans = proj[:3, 3:4]
+
+    y, x = torch.meshgrid([torch.arange(0, height, dtype=torch.float32),
+                           torch.arange(0, width, dtype=torch.float32)],
+                          indexing='ij')
+    y, x = y.contiguous(), x.contiguous()
+    y, x = y.reshape(height * width), x.reshape(height * width)
+    homog = torch.stack((x, y, torch.ones_like(x))).to(bwd_rot)
+    homog = homog[..., pixl_ids] # (N_rays, 3)
+
+    # get world coords
+    world_coords = torch.matmul(bwd_rot, homog)  # (N_rays, 3)
+    world_coords = world_coords * depth_map.reshape(1, -1)
+    world_coords = world_coords + bwd_trans.reshape(3, 1)
+    world_coords = torch.movedim(world_coords, 0, 1)  # (N_rays, 3)
+    # world_coords = world_coords.reshape(height, width, 3)
+
+    # get pixel projection
+    rot_coords = torch.matmul(rot, homog)
+    proj_3d = rot_coords * depth_map.reshape(1, -1)
+    proj_3d = proj_3d + trans.reshape(3, 1)
+    proj_2d = proj_3d[:2, :] / proj_3d[2:3, :]
+    proj_2d = (torch.movedim(proj_2d, 0, 1)).to(torch.long)
+    proj_2d = torch.flip(proj_2d, dims=(1,))
+
+    # compute projected depth
+    proj_depth = torch.sub(world_coords, C_ref).unsqueeze(-1)
+    proj_depth = torch.matmul(z_ref, proj_depth).reshape(height, width)
+    proj_depth = proj_depth.reshape(-1, 1)
+
+    # mask out invalid indices
+    mask = torch.where(proj_2d[:, 0] < height, 1, 0) * \
+           torch.where(proj_2d[:, 0] >= 0, 1, 0) * \
+           torch.where(proj_2d[:, 1] < width, 1, 0) * \
+           torch.where(proj_2d[:, 1] >= 0, 1, 0)
+
+    mask = mask.reshape(-1,1).to(proj_depth)
+    warped_depth = proj_depth * mask  # (N_rays)
+
+    return warped_depth
+
 
 
 
