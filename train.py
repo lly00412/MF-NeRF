@@ -677,8 +677,13 @@ if __name__ == '__main__':
         view_select_log = os.path.join(system.val_dir, f'view_select.txt')
         with open(view_select_log, 'a') as f:
             f.write(f'View Select by: {hparams.pick_by}\n')
+            f.write(f'Sample rate: {hparams.vs_sample_rate}')
             f.write(f'Selected views: {system.choice}\n')
             f.write(f'Time for selection process: {time_cost}\n')
+            if hparams.pick_by=='mcd':
+                f.write(f'MCD by: {hparams.vals}')
+                f.write(f'N_passes: {hparams.n_passes}')
+                f.write(f'Drop prob: {hparams.p}')
             f.close()
 
     if hparams.retrain:
