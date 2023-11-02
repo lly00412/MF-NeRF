@@ -408,13 +408,17 @@ class NeRFSystem(LightningModule):
             counts = counts.cpu()
             warp_u[counts>0] = warp_sigmas[counts>0]
 
-            warp_img = torch.zeros(h*w).to(warp_sigmas)
-            warp_img[results['pix_idxs']] = warp_sigmas
-            warp_img = rearrange(warp_img.cpu().numpy(), '(h w) -> h w', h=h)
-            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'), err2img(warp_img))
-
-            warp_score = torch.median(warp_sigmas[counts>0].flatten())
+            warp_score = torch.median(warp_sigmas[counts > 0].flatten())
             logs['warp'] = warp_score.cpu()
+
+            warp_sigmas = err2img(warp_sigmas.cpu().numpy())   # (n_rays) 3
+            warp_img = np.zeros((h*w, 3))
+            warp_img[results['pix_idxs'].cpu().numpy()] = warp_sigmas
+            warp_img = rearrange(warp_img, '(h w) c -> h w c', h=h)
+            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'),warp_img)
+            n_px = len(results['pix_idxs'])
+            print(f'total pxs: {h*w}')
+            print(f'sample pxs: {n_px}' )
 
         ###################################################
         #              MC-Dropout
@@ -447,10 +451,17 @@ class NeRFSystem(LightningModule):
             mcd_score = torch.median(results['mcd'].flatten())
             logs['mcd'] = mcd_score.cpu()
 
-            mcd_img = torch.zeros(h * w).to(results['mcd'])
-            mcd_img[results['pix_idxs']] = results['mcd']
-            mcd_img = rearrange(mcd_img.cpu().numpy(), '(h w) -> h w', h=h)
-            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), err2img(mcd_img))
+            mcd_preds = results['mcd'].cpu().numpy()
+            mcd_preds = err2img(mcd_preds) # n_rays, 3
+            mcd_img = np.zeros((h * w, 3))
+            mcd_img[results['pix_idxs'].cpu().numpy()] = mcd_preds
+            mcd_img = rearrange(mcd_img, '(h w) c -> h w c', h=h)
+            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), mcd_img)
+            n_px = len(results['pix_idxs'])
+            print(f'total pxs: {h * w}')
+            print(f'sample pxs: {n_px}')
+
+
 
         if self.hparams.plot_roc:
             img_id = batch['img_idxs']
