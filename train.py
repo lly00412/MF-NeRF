@@ -240,6 +240,10 @@ class NeRFSystem(LightningModule):
         torch.cuda.empty_cache()
         if self.hparams.view_select:
             self.hparams.no_save_test = True
+
+        # for mcdropout
+        if self.hparams.mcdropout or self.hparams.pick_by == 'mcd':
+            self.hparams.exp_name = os.path.join(self.hparams.exp_name,self.hparams.vals)
         if (not self.hparams.no_save_test) or self.hparams.view_select:
             self.val_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}'
             os.makedirs(self.val_dir, exist_ok=True)
@@ -417,6 +421,8 @@ class NeRFSystem(LightningModule):
         ###################################################
 
         if self.hparams.mcdropout or self.hparams.pick_by=='mcd':
+            idx = batch['img_idxs']
+
             enable_dropout(self.model.rgb_net,p=self.hparams.p)
             mcd_rgb_preds = []
             print('Start MC-Dropout...')
@@ -428,16 +434,23 @@ class NeRFSystem(LightningModule):
                     mcd_results = self.render_by_rays(results['pix_idxs'],batch,self.hparams.vs_batch_size)
                 else:
                     mcd_results = self(batch,split='test')
-                mcd_rgb_preds.append(mcd_results['rgb']) # (h w) c
+                mcd_rgb_preds.append(mcd_results[self.hparams.vals]) # (h w) c
                 # mcd += mcd_results['rgb']
                 # mcd_squre += mcd_results['rgb'] ** 2
                 del mcd_results
-            mcd_rgb_preds = torch.stack(mcd_rgb_preds,0) # n (h w) c
-            results['mcd'] = mcd_rgb_preds.mean(-1).std(0) # (h w)
+            mcd_rgb_preds = torch.stack(mcd_rgb_preds,0) #rgb: n (h w) c    depth: n (h w)
+            if mcd_rgb_preds.ndim>2:
+                mcd_rgb_preds = mcd_rgb_preds.mean(-1)
+            results['mcd'] = mcd_rgb_preds.std(0) # (h w)
             close_dropout(self.model.rgb_net)
 
             mcd_score = torch.median(results['mcd'].flatten())
             logs['mcd'] = mcd_score.cpu()
+
+            mcd_img = torch.zeros(h * w).to(results['mcd'])
+            mcd_img[results['pix_idxs']] = results['mcd']
+            mcd_img = rearrange(mcd_img.cpu().numpy(), '(h w) -> h w', h=h)
+            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), err2img(mcd_img))
 
         if self.hparams.plot_roc:
             img_id = batch['img_idxs']

@@ -110,6 +110,9 @@ def get_opts():
                         help='number of passes for mc_dropout')
     parser.add_argument("--p", type=float, default=0.5,
                         help='drop prob for mc_dropout')
+    parser.add_argument("--vals", type=str, default='rgb',
+                        choices=['rgb', 'depth'],
+                        help='run dropout on rgb / depth value')
 
     # misc
     parser.add_argument('--exp_name', type=str, default='exp',
