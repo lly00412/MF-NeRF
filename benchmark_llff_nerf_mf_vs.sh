@@ -6,7 +6,7 @@ export CKPT_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/nerf_llff/mfgrid_T20_level
 export CUDA_VISIBLE_DEVICES=0
 
 scenes=(room horns trex fortress)
-sample_rate=(0.50)
+sample_rate=(0.05 0.1 0.50)
 
 #### train the base line
 
