@@ -240,10 +240,6 @@ class NeRFSystem(LightningModule):
         torch.cuda.empty_cache()
         if self.hparams.view_select:
             self.hparams.no_save_test = True
-
-        # for mcdropout
-        if self.hparams.mcdropout or self.hparams.pick_by == 'mcd':
-            self.hparams.exp_name = os.path.join(self.hparams.exp_name,self.hparams.vals)
         if (not self.hparams.no_save_test) or self.hparams.view_select:
             self.val_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}'
             os.makedirs(self.val_dir, exist_ok=True)
@@ -411,8 +407,9 @@ class NeRFSystem(LightningModule):
             warp_score = torch.median(warp_sigmas[counts > 0].flatten())
             logs['warp'] = warp_score.cpu()
 
-            warp_sigmas = err2img(warp_sigmas.cpu().numpy())   # (n_rays) 3
-            warp_img = np.zeros((h*w, 3))
+            warp_sigmas = err2img(warp_sigmas.cpu().numpy())   # (n_rays) 1 3
+            warp_sigmas = warp_sigmas.squeeze(1)
+            warp_img = np.zeros((h*w, 3)).astype(np.uint8)
             warp_img[results['pix_idxs'].cpu().numpy()] = warp_sigmas
             warp_img = rearrange(warp_img, '(h w) c -> h w c', h=h)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'),warp_img)
@@ -453,7 +450,8 @@ class NeRFSystem(LightningModule):
 
             mcd_preds = results['mcd'].cpu().numpy()
             mcd_preds = err2img(mcd_preds) # n_rays, 3
-            mcd_img = np.zeros((h * w, 3))
+            mcd_preds = mcd_preds.squeeze(1)
+            mcd_img = np.zeros((h * w, 3)).astype(np.uint8)
             mcd_img[results['pix_idxs'].cpu().numpy()] = mcd_preds
             mcd_img = rearrange(mcd_img, '(h w) c -> h w c', h=h)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), mcd_img)
@@ -620,9 +618,19 @@ if __name__ == '__main__':
     # view selection must run the validation first except for random choice
     if hparams.view_select:
         print('Starting view selection！')
-        hparams.exp_name = os.path.join(ori_exp_name, hparams.pick_by, 'vs')
         hparams.val_only = True
         hparams.no_save_test = True
+
+        if hparams.vs_sample_rate < 1.0:
+            hparams.exp_name = os.path.join(ori_exp_name, 'sparse', f'sr{hparams.vs_sample_rate}')
+
+        hparams.exp_name = os.path.join(hparams.exp_name, hparams.pick_by)
+
+        if hparams.pick_by== 'mcd':
+            hparams.exp_name = os.path.join(hparams.exp_name, hparams.vals)
+
+        hparams.exp_name = os.path.join(hparams.exp_name, 'vs')
+
         if hparams.pick_by == 'random':
             hparams.fewshot = hparams.fewshot+hparams.n_view
             hparams.val_only = False
