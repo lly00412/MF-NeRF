@@ -95,7 +95,7 @@ class NeRFSystem(LightningModule):
         if split=='train':
             poses = self.poses[batch['img_idxs']]
             directions = self.directions[batch['pix_idxs']]
-        elif split=='vs':
+        elif (split=='vs' and self.hparams.vs_sample_rate<1):
             poses = batch['pose'].unsqueeze(0).repeat(len(batch['pix_idxs']),1,1)
             directions = self.directions[batch['pix_idxs']]
         else:
@@ -282,7 +282,7 @@ class NeRFSystem(LightningModule):
                    'eval':{}}
         rgb_gt = batch['rgb']
 
-        if self.hparams.view_select:
+        if self.hparams.view_select and self.hparams.vs_sample_rate<1:
             total_rays = self.test_dataset.img_wh[0] * self.test_dataset.img_wh[1]
             n_samples = int(self.hparams.vs_sample_rate*total_rays)
             #pix_idxs = np.random.choice(self.test_dataset.img_wh[0] * self.test_dataset.img_wh[1], self.hparams.vs_batch_size, replace=False)
@@ -314,15 +314,22 @@ class NeRFSystem(LightningModule):
 
             torch.cuda.empty_cache()
             if self.hparams.eval_lpips:
-                self.val_lpips(torch.clip(rgb_pred[:, :, :, :w // 2] * 2 - 1, -1, 1),
-                               torch.clip(rgb_gt[:, :, :, :w // 2] * 2 - 1, -1, 1))
-                score1 = self.val_lpips.compute()
-                self.val_lpips.reset()
-                self.val_lpips(torch.clip(rgb_pred[:, :, :, w // 2:] * 2 - 1, -1, 1),
-                               torch.clip(rgb_gt[:, :, :, w // 2:] * 2 - 1, -1, 1))
-                score2 = self.val_lpips.compute()
-                self.val_lpips.reset()
-                logs['lpips'] = (score1 + score2).mean()
+                if self.hparams.dataset_name=='colmap':
+                    self.val_lpips(torch.clip(rgb_pred[:, :, :, :w // 2] * 2 - 1, -1, 1),
+                                   torch.clip(rgb_gt[:, :, :, :w // 2] * 2 - 1, -1, 1))
+                    score1 = self.val_lpips.compute()
+                    self.val_lpips.reset()
+                    self.val_lpips(torch.clip(rgb_pred[:, :, :, w // 2:] * 2 - 1, -1, 1),
+                                   torch.clip(rgb_gt[:, :, :, w // 2:] * 2 - 1, -1, 1))
+                    score2 = self.val_lpips.compute()
+                    self.val_lpips.reset()
+                    logs['lpips'] = (score1 + score2).mean()
+                else:
+                    self.val_lpips(torch.clip(rgb_pred[:, :, :, :] * 2 - 1, -1, 1),
+                                   torch.clip(rgb_gt[:, :, :, :] * 2 - 1, -1, 1))
+                    score = self.val_lpips.compute()
+                    self.val_lpips.reset()
+                    logs['lpips'] = score.mean()
                 outputs['eval']['lpips'] = logs['lpips'].cpu().numpy()
 
         #################################################
@@ -342,7 +349,7 @@ class NeRFSystem(LightningModule):
                      'K': self.test_dataset.K.clone().cpu(),
                      'device': device,
                      'ref_depth_map': results['depth'].cpu(),
-                     'dense_map': not self.hparams.view_select,
+                     'dense_map': not (self.hparams.vs_sample_rate<1),
                      'pix_ids': results['pix_idxs'],
                      'img_h': h,
                      'img_w': w}
@@ -352,13 +359,14 @@ class NeRFSystem(LightningModule):
             rot_ax = ['x','x','y','y']
             warp_depths = [vargs['ref_depth_map'].cpu()]
             counts = 0
+            total_r = h * w
             for theta, ax in zip(thetas,rot_ax):
                 new_c2w = Vcam.get_near_c2w(batch['pose'].clone().cpu(), theta=theta, axis=ax)
 
-                if not self.hparams.view_select:
-                    warp_func = warp_tgt_to_ref
-                else:
+                if self.hparams.view_select and self.hparams.vs_sample_rate<1:
                     warp_func = warp_tgt_to_ref_sparse
+                else:
+                    warp_func = warp_tgt_to_ref
 
                 ##################################################
                 #      render vcams and warp to the center cam
@@ -391,7 +399,10 @@ class NeRFSystem(LightningModule):
                 warp_depth, out_pix_idxs = warp_func(results['depth'].cpu(), new_c2w, batch['pose'],
                                             self.test_dataset.K,
                                             results['pix_idxs'], (h, w), device)
-                warp_depth[out_pix_idxs == 0] = float('nan')
+                if warp_depth.shape[0]<total_r:
+                    warp_depth[out_pix_idxs == 0] = float('nan')
+                else:
+                    warp_depth[warp_depth == 0] = float('nan')
                 warp_depth = warp_depth.cpu()
                 warp_depths += [warp_depth]
                 counts += (out_pix_idxs > 0)
@@ -409,13 +420,16 @@ class NeRFSystem(LightningModule):
 
             warp_sigmas = err2img(warp_sigmas.cpu().numpy())   # (n_rays) 1 3
             warp_sigmas = warp_sigmas.squeeze(1)
-            warp_img = np.zeros((h*w, 3)).astype(np.uint8)
-            warp_img[results['pix_idxs'].cpu().numpy()] = warp_sigmas
-            warp_img = rearrange(warp_img, '(h w) c -> h w c', h=h)
+            if warp_sigmas.shape[0]<total_r:
+                warp_img = np.zeros((h*w, 3)).astype(np.uint8)
+                warp_img[results['pix_idxs'].cpu().numpy()] = warp_sigmas
+                warp_img = rearrange(warp_img, '(h w) c -> h w c', h=h)
+            else:
+                warp_img = rearrange(warp_sigmas, '(h w) c -> h w c', h=h)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'),warp_img)
             n_px = len(results['pix_idxs'])
-            print(f'total pxs: {h*w}')
-            print(f'sample pxs: {n_px}' )
+            # print(f'total pxs: {h*w}')
+            # print(f'sample pxs: {n_px}' )
 
         ###################################################
         #              MC-Dropout
@@ -423,6 +437,7 @@ class NeRFSystem(LightningModule):
 
         if self.hparams.mcdropout or self.hparams.pick_by=='mcd':
             idx = batch['img_idxs']
+            total_r = h * w
 
             enable_dropout(self.model.rgb_net,p=self.hparams.p)
             mcd_rgb_preds = []
@@ -431,7 +446,7 @@ class NeRFSystem(LightningModule):
             #TODO: E[(x-miu)^2] = E[x^2]-miu^2
             N_passes = self.hparams.n_passes
             for N in trange(N_passes):
-                if self.hparams.view_select:
+                if self.hparams.view_select and self.hparams.vs_sample_rate<1:
                     mcd_results = self.render_by_rays(results['pix_idxs'],batch,self.hparams.vs_batch_size)
                 else:
                     mcd_results = self(batch,split='test')
@@ -451,13 +466,16 @@ class NeRFSystem(LightningModule):
             mcd_preds = results['mcd'].cpu().numpy()
             mcd_preds = err2img(mcd_preds) # n_rays, 3
             mcd_preds = mcd_preds.squeeze(1)
-            mcd_img = np.zeros((h * w, 3)).astype(np.uint8)
-            mcd_img[results['pix_idxs'].cpu().numpy()] = mcd_preds
-            mcd_img = rearrange(mcd_img, '(h w) c -> h w c', h=h)
+            if mcd_preds.shape[0] < total_r:
+                mcd_img = np.zeros((h * w, 3)).astype(np.uint8)
+                mcd_img[results['pix_idxs'].cpu().numpy()] = mcd_preds
+                mcd_img = rearrange(mcd_img, '(h w) c -> h w c', h=h)
+            else:
+                mcd_img = rearrange(mcd_preds, '(h w) c -> h w c', h=h)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), mcd_img)
-            n_px = len(results['pix_idxs'])
-            print(f'total pxs: {h * w}')
-            print(f'sample pxs: {n_px}')
+            # n_px = len(results['pix_idxs'])
+            # print(f'total pxs: {h * w}')
+            # print(f'sample pxs: {n_px}')
 
 
 
@@ -661,6 +679,8 @@ if __name__ == '__main__':
                                name=hparams.exp_name,
                                default_hp_metric=False)
 
+    time_log = os.path.join(f"logs/{hparams.dataset_name}",hparams.exp_name, 'run_time.txt')
+
     trainer = Trainer(max_epochs=0 if hparams.val_only else hparams.num_epochs,
                       check_val_every_n_epoch=hparams.num_epochs,
                       callbacks=callbacks,
@@ -682,8 +702,7 @@ if __name__ == '__main__':
         print(f'View selection by {hparams.pick_by}:  {view_choices}')
         print('Time for selection process: {}'.format(time_cost))
 
-        view_select_log = os.path.join(system.val_dir, f'view_select.txt')
-        with open(view_select_log, 'a') as f:
+        with open(time_log, 'a') as f:
             f.write(f'View Select by: {hparams.pick_by}\n')
             f.write(f'Sample rate: {hparams.vs_sample_rate}')
             f.write(f'Selected views: {system.choice}\n')
@@ -753,5 +772,9 @@ if __name__ == '__main__':
     end = time.time()
     runtime = time.strftime("%H:%M:%S", time.gmtime(end - start))
     print('Total runtime: {}'.format(runtime))
+
+    with open(time_log, 'a') as f:
+        f.write(f'Total runtime: {runtime}\n')
+        f.close()
 
 

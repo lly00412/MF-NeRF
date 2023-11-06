@@ -80,8 +80,8 @@ def get_opts():
                         help='percentage of sampling rays per view, 1 means rendering all rays')
     parser.add_argument('--vs_batch_size', type=int, default=1024,
                         help='number of rays processing a batch for view selection')
-    parser.add_argument('--pick_by', type=str, default='warp',
-                        choices=['random','warp', 'mcd'],
+    parser.add_argument('--pick_by', type=str, default=None,
+                        choices=[None,'random','warp', 'mcd'],
                         help='select supplemental views by random / warping uncertainty / mcdropout')
     parser.add_argument('--n_view', type=int, default=4,
                         help='num of view selected from the rest of trainning set')

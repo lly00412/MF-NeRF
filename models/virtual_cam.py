@@ -14,13 +14,14 @@ class GetVirtualCam:
         self.pixl_ids = kwargs['pix_ids']
         self.img_h = kwargs['img_h']
         self.img_w = kwargs['img_w']
-        if kwargs.get('dense_map', False):
+        self.dense = kwargs['dense_map']
+        if self.dense:
             self.ref_depth_map = rearrange(self.ref_depth_map, '(h w) -> h w', h=self.img_h),
 
         self.scene_center = self.get_scene_center()
 
     def get_scene_center(self):
-        if self.ref_depth_map.ndim < 2:
+        if not self.dense:
             return self.get_scene_center_sparse()
         else:
             return self.get_scene_center_dense()

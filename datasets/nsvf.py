@@ -11,10 +11,11 @@ from .base import BaseDataset
 
 
 class NSVFDataset(BaseDataset):
-    def __init__(self, root_dir, split='train', downsample=1.0, fewshot=0,fewshot_seed=340,**kwargs):
+    def __init__(self, root_dir, split='train', downsample=1.0, fewshot=0,fewshot_seed=340,subs=None,**kwargs):
         super().__init__(root_dir, split, downsample,fewshot,fewshot_seed)
         self.fewshot = fewshot
         self.seed = fewshot_seed
+        self.subs = subs
 
         self.read_intrinsics()
 
@@ -85,11 +86,19 @@ class NSVFDataset(BaseDataset):
             poses = sorted(glob.glob(os.path.join(self.root_dir, 'pose', prefix+'*.txt')))
 
 
-            if self.fewshot>0:
-                np.random.seed(self.seed)
-                subs = np.random.choice(len(img_paths), self.fewshot)
-                img_paths = np.array(img_paths)[subs]
-                poses = np.array(poses)[subs]
+            if split == 'train':
+                if self.subs is not None:
+                    self.full = len(img_paths)
+                    img_paths = np.array(img_paths)[self.subs]
+                    poses = np.array(poses)[self.subs]
+
+                elif self.fewshot > 0:
+                    np.random.seed(self.seed)
+                    self.full = len(img_paths)
+                    self.subs = np.random.choice(len(img_paths), self.fewshot, replace=False)
+                    img_paths = np.array(img_paths)[self.subs]
+                    poses = np.array(poses)[self.subs]
+
 
             print(f'Loading {len(img_paths)} {split} images ...')
             for img_path, pose in tqdm(zip(img_paths, poses)):
@@ -101,7 +110,7 @@ class NSVFDataset(BaseDataset):
                 img = read_image(img_path, self.img_wh)
                 if 'Jade' in self.root_dir or 'Fountain' in self.root_dir:
                     # these scenes have black background, changing to white
-                    img[torch.all(img<=0.1, dim=-1)] = 1.0
+                    img[np.all(img<=0.1, axis=-1)] = 1.0
 
                 self.rays += [img]
 

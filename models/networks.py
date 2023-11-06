@@ -67,7 +67,7 @@ class NGP(nn.Module):
                 },
             )
 
-        # self.rgb_net = \
+        # self.rgb_mlp = \
         #     tcnn.Network(
         #         n_input_dims=32, n_output_dims=128,
         #         network_config={
@@ -80,16 +80,21 @@ class NGP(nn.Module):
         #     )
 
         self.rgb_net = torch.nn.Sequential(
-            nn.Linear(32, 128, bias=False),
+            nn.Linear(32, 128,bias=False),
             nn.ReLU(),
-            # nn.Dropout(p=0),
-            nn.Linear(128, 128, bias=False),
+            nn.Linear(128, 128,bias=False),
             nn.ReLU(),
-            nn.Linear(128, 128, bias=False),
+            nn.Linear(128, 128,bias=False),
             nn.ReLU(),
             nn.Dropout(p=0),
-            nn.Linear(128, 3, bias=False),
+            nn.Linear(128, 3,bias=False),
         )
+
+        # self.rgb_net = torch.nn.Sequential(
+        #     self.rgb_mlp,
+        #     nn.Dropout(p=0),
+        #     nn.Linear(128, 3,bias=False),
+        # )
 
         if self.rgb_act == 'None': # rgb_net output is log-radiance
             for i in range(3): # independent tonemappers for r,g,b

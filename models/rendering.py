@@ -92,10 +92,10 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         if valid_mask.sum()==0: break
 
         sigmas = torch.zeros(len(xyzs), device=device)
-        rgbs = torch.zeros(len(xyzs), 3, device=device)
+        rgbs = torch.zeros(len(xyzs), 3, device=device).float()
 
         ################# TO SOLVE THE MEMORY PROBLEM #################
-        N_trunks = 4
+        N_trunks = 8
         valid_mask = list(torch.chunk(valid_mask, chunks=N_trunks))
         xyzs = list(torch.chunk(xyzs, chunks=N_trunks))
         dirs = list(torch.chunk(dirs, chunks=N_trunks))
@@ -103,6 +103,8 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         rgbs = list(torch.chunk(rgbs, chunks=N_trunks))
 
         for t_idx in range(N_trunks):
+            if valid_mask[t_idx].sum()<20:
+                continue
             sigmas[t_idx][valid_mask[t_idx]], _rgbs = model(xyzs[t_idx][valid_mask[t_idx]],
                                                             dirs[t_idx][valid_mask[t_idx]], **kwargs)
             rgbs[t_idx][valid_mask[t_idx]] = _rgbs.float()

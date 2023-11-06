@@ -160,7 +160,7 @@ def warp_tgt_to_ref(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids=None, img_shape=Non
 
     warped_depth = torch.zeros(height*width).to(proj_depth)
     warped_depth[proj_2d] = proj_depth
-    warped_depth = warped_depth.reshape(height, width)
+    # warped_depth = warped_depth.reshape(height, width)
 
     del proj_depth
 
