@@ -450,10 +450,11 @@ class NeRFSystem(LightningModule):
             idx = batch['img_idxs']
             total_r = h * w
 
-            enable_dropout(self.model.rgb_net,p=self.hparams.p)
-            mcd_rgb_preds = []
-            print('Start MC-Dropout...')
 
+            enable_dropout(self.model.rgb_net,p=self.hparams.p)
+            mcd_preds = []
+            print('Start MC-Dropout...')
+            counts = 0
             #TODO: E[(x-miu)^2] = E[x^2]-miu^2
             N_passes = self.hparams.n_passes
             for N in trange(N_passes):
@@ -461,33 +462,44 @@ class NeRFSystem(LightningModule):
                     mcd_results = self.render_by_rays(results['pix_idxs'],batch,self.hparams.vs_batch_size)
                 else:
                     mcd_results = self(batch,split='test')
-                mcd_rgb_preds.append(mcd_results[self.hparams.vals]) # (h w) c
+                opacity = mcd_results['opacity']
+                mcd_pred = mcd_results[self.hparams.vals]
+                _mcd_pred = torch.full_like(mcd_pred,float("nan"))
+                _mcd_pred[opacity>0]=mcd_pred[opacity>0]
+                counts += (opacity>0)
+                mcd_preds.append(_mcd_pred) # (h w) c
                 # mcd += mcd_results['rgb']
                 # mcd_squre += mcd_results['rgb'] ** 2
                 del mcd_results
-            mcd_rgb_preds = torch.stack(mcd_rgb_preds,0) #rgb: n (h w) c    depth: n (h w)
-            if mcd_rgb_preds.ndim>2:
-                mcd_rgb_preds = mcd_rgb_preds.mean(-1)
-            results['mcd'] = mcd_rgb_preds.std(0) # (h w)
             close_dropout(self.model.rgb_net)
+            mcd_preds = torch.stack(mcd_preds,0) #rgb: n (h w) c    depth: n (h w)
+            if mcd_preds.ndim>2:
+                mcd_preds = mcd_preds.mean(-1)
+                mcd_preds = mcd_preds.cpu().numpy()
+            mcd_sigmas = np.nanstd(mcd_preds, 0)
+            mcd_sigmas = torch.from_numpy(mcd_sigmas)
+            results['mcd'] = mcd_sigmas
+            counts = counts.cpu()
 
-            mcd_score = torch.median(results['mcd'].flatten())
+            mcd_score = torch.median(mcd_sigmas[counts>0].flatten())
             logs['mcd'] = mcd_score.cpu()
 
-            mcd_preds = results['mcd'].cpu().numpy()
-            mcd_preds = err2img(mcd_preds) # n_rays, 3
-            mcd_preds = mcd_preds.squeeze(1)
-            if mcd_preds.shape[0] < total_r:
+            mcd_sigmas = err2img(mcd_sigmas.cpu().numpy()) # n_rays, 1, 3
+            mcd_sigmas = mcd_sigmas.squeeze(1)
+            counts = counts.numpy()
+            if mcd_sigmas.shape[0] < total_r:
                 mcd_img = np.zeros((h * w, 3)).astype(np.uint8)
-                mcd_img[results['pix_idxs'].cpu().numpy()] = mcd_preds
+                mcd_img[results['pix_idxs'].cpu().numpy()][counts>0] = mcd_sigmas[counts>0]
                 mcd_img = rearrange(mcd_img, '(h w) c -> h w c', h=h)
             else:
-                mcd_img = rearrange(mcd_preds, '(h w) c -> h w c', h=h)
+                mcd_img = np.zeros((h * w, 3)).astype(np.uint8)
+                mcd_img[counts>0] = mcd_sigmas[counts>0]
+                mcd_img = rearrange(mcd_img, '(h w) c -> h w c', h=h)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), mcd_img)
-            # n_px = len(results['pix_idxs'])
-            # print(f'total pxs: {h * w}')
-            # print(f'sample pxs: {n_px}')
-
+            img_id = self.test_dataset.subs[idx]
+            print(f'img {img_id} warp score:{mcd_score.cpu()}')
+            print(f'Total pxs: {h * w}')
+            print(f'count pxs: {(counts > 0).sum()}')
 
 
         if self.hparams.plot_roc:
