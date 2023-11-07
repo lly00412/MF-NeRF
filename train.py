@@ -484,16 +484,16 @@ class NeRFSystem(LightningModule):
             mcd_score = torch.median(mcd_sigmas[counts>0].flatten())
             logs['mcd'] = mcd_score.cpu()
 
-            mcd_sigmas = err2img(mcd_sigmas.cpu().numpy()) # n_rays, 1, 3
+            mcd_sigmas = err2img(mcd_sigmas[counts>0].cpu().numpy()) # n_rays, 1, 3
             mcd_sigmas = mcd_sigmas.squeeze(1)
             counts = counts.numpy()
             if mcd_sigmas.shape[0] < total_r:
                 mcd_img = np.zeros((h * w, 3)).astype(np.uint8)
-                mcd_img[results['pix_idxs'].cpu().numpy()][counts>0] = mcd_sigmas[counts>0]
+                mcd_img[results['pix_idxs'].cpu().numpy()][counts>0] = mcd_sigmas
                 mcd_img = rearrange(mcd_img, '(h w) c -> h w c', h=h)
             else:
                 mcd_img = np.zeros((h * w, 3)).astype(np.uint8)
-                mcd_img[counts>0] = mcd_sigmas[counts>0]
+                mcd_img[counts>0] = mcd_sigmas
                 mcd_img = rearrange(mcd_img, '(h w) c -> h w c', h=h)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), mcd_img)
             img_id = self.test_dataset.subs[idx]
@@ -742,7 +742,10 @@ if __name__ == '__main__':
         hparams.no_save_test = False
         hparams.train_img = view_choices+system.train_dataset.subs.tolist()
 
-        hparams.exp_name = os.path.join(ori_exp_name, hparams.pick_by, 'retrain')
+        hparams.exp_name = os.path.join(ori_exp_name, hparams.pick_by)
+        if hparams.pick_by== 'mcd':
+            hparams.exp_name = os.path.join(hparams.exp_name, hparams.vals)
+        hparams.exp_name = os.path.join(hparams.exp_name, 'retrain')
 
         hparams.pick_by = None
 
