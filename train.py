@@ -401,7 +401,7 @@ class NeRFSystem(LightningModule):
                 warp_depth, out_pix_idxs = warp_func(results['depth'].cpu(), new_c2w, batch['pose'],
                                             self.test_dataset.K,
                                             results['pix_idxs'], (h, w), device)
-                if warp_depth.shape[0]<total_r:
+                if self.hparams.vs_sample_rate<1:
                     warp_depth[out_pix_idxs == 0] = float('nan')
                     warp_depth[opacity == 0] = float('nan')
                     counts += (out_pix_idxs.cpu() > 0) & (opacity >0)
@@ -431,7 +431,7 @@ class NeRFSystem(LightningModule):
 
             warp_sigmas = err2img(warp_sigmas.cpu().numpy())   # (n_rays) 1 3
             warp_sigmas = warp_sigmas.squeeze(1)
-            if warp_sigmas.shape[0]<total_r:
+            if self.hparams.vs_sample_rate<1:
                 warp_img = np.zeros((h*w, 3)).astype(np.uint8)
                 warp_img[results['pix_idxs'].cpu().numpy()] = warp_sigmas
                 warp_img = rearrange(warp_img, '(h w) c -> h w c', h=h)
@@ -448,7 +448,6 @@ class NeRFSystem(LightningModule):
 
         if self.hparams.mcdropout or self.hparams.pick_by=='mcd':
             idx = batch['img_idxs']
-            total_r = h * w
 
             enable_dropout(self.model.rgb_net,p=self.hparams.p)
             mcd_rgb_preds = []
@@ -477,7 +476,7 @@ class NeRFSystem(LightningModule):
             mcd_preds = results['mcd'].cpu().numpy()
             mcd_preds = err2img(mcd_preds) # n_rays, 3
             mcd_preds = mcd_preds.squeeze(1)
-            if mcd_preds.shape[0] < total_r:
+            if self.hparams.vs_sample_rate<1:
                 mcd_img = np.zeros((h * w, 3)).astype(np.uint8)
                 mcd_img[results['pix_idxs'].cpu().numpy()] = mcd_preds
                 mcd_img = rearrange(mcd_img, '(h w) c -> h w c', h=h)
