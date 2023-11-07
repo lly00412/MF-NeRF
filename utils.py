@@ -70,6 +70,7 @@ def slim_ckpt(ckpt_path, save_poses=False):
 
 def warp_tgt_to_ref(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids=None, img_shape=None,device='cpu'):
     depth_map = tgt_depth.clone()
+    height, width = img_shape
 
     K_homo = torch.eye(4)
     K_homo[:3,:3] = K.clone().cpu()
@@ -84,7 +85,6 @@ def warp_tgt_to_ref(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids=None, img_shape=Non
 
     torch.cuda.empty_cache()
     # warp tgt depth map to ref view
-    height, width = tgt_depth.shape
     # grab intrinsics and extrinsics from reference view
     P_ref = rw2c.to(torch.float32) # 4x4
     K_ref = K_homo.clone().to(torch.float32) # 4x4

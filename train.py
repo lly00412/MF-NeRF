@@ -337,6 +337,7 @@ class NeRFSystem(LightningModule):
         #################################################
         if self.hparams.render_vcam or self.hparams.pick_by=='warp':
             idx = batch['img_idxs']
+            opacity = results['opacity'].cpu() # (n_rays)
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             # vargs = {'ref_c2w': batch['pose'].clone().cpu(),
             #          'K': self.test_dataset.K.clone().cpu(),
@@ -349,6 +350,7 @@ class NeRFSystem(LightningModule):
                      'K': self.test_dataset.K.clone().cpu(),
                      'device': device,
                      'ref_depth_map': results['depth'].cpu(),
+                     'opacity': opacity,
                      'dense_map': not (self.hparams.vs_sample_rate<1),
                      'pix_ids': results['pix_idxs'],
                      'img_h': h,
@@ -401,22 +403,31 @@ class NeRFSystem(LightningModule):
                                             results['pix_idxs'], (h, w), device)
                 if warp_depth.shape[0]<total_r:
                     warp_depth[out_pix_idxs == 0] = float('nan')
+                    warp_depth[opacity == 0] = float('nan')
+                    counts += (out_pix_idxs.cpu() > 0) & (opacity >0)
                 else:
                     warp_depth[warp_depth == 0] = float('nan')
+                    warp_depth[opacity == 0] = float('nan')
+                    counts += (warp_depth.cpu() > 0) & (opacity >0)
                 warp_depth = warp_depth.cpu()
                 warp_depths += [warp_depth]
-                counts += (out_pix_idxs > 0)
+
 
             warp_depths = torch.stack(warp_depths)
             warp_sigmas = np.nanstd(warp_depths.cpu().numpy(),axis=0)
             warp_sigmas = torch.from_numpy(warp_sigmas)
 
-            warp_u = torch.zeros_like(warp_sigmas)
-            counts = counts.cpu()
+            # warp_u = torch.zeros_like(warp_sigmas)
+            warp_u = torch.full_like(warp_sigmas,float("Inf"))
             warp_u[counts>0] = warp_sigmas[counts>0]
 
-            warp_score = torch.median(warp_sigmas[counts > 0].flatten())
+            warp_score = torch.median(warp_sigmas.flatten())
             logs['warp'] = warp_score.cpu()
+            img_id = self.test_dataset.subs[idx]
+            print(f'img {img_id} warp score:{warp_score.cpu()}')
+            print(f'Total pxs: {h*w}')
+            print(f'count pxs: {(counts>0).sum()}')
+            print(f'valid pxs: {(opacity > 0).sum()}')
 
             warp_sigmas = err2img(warp_sigmas.cpu().numpy())   # (n_rays) 1 3
             warp_sigmas = warp_sigmas.squeeze(1)
@@ -427,7 +438,7 @@ class NeRFSystem(LightningModule):
             else:
                 warp_img = rearrange(warp_sigmas, '(h w) c -> h w c', h=h)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'),warp_img)
-            n_px = len(results['pix_idxs'])
+            # n_px = len(results['pix_idxs'])
             # print(f'total pxs: {h*w}')
             # print(f'sample pxs: {n_px}' )
 

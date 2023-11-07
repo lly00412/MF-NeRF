@@ -15,8 +15,9 @@ class GetVirtualCam:
         self.img_h = kwargs['img_h']
         self.img_w = kwargs['img_w']
         self.dense = kwargs['dense_map']
+        self.opacity = kwargs['opacity']
         if self.dense:
-            self.ref_depth_map = rearrange(self.ref_depth_map, '(h w) -> h w', h=self.img_h),
+            self.ref_depth_map = self.ref_depth_map.reshape(self.img_h,self.img_w)
 
         self.scene_center = self.get_scene_center()
 
@@ -56,7 +57,8 @@ class GetVirtualCam:
         world_coords = world_coords + bwd_trans.reshape(3, 1)
         world_coords = torch.movedim(world_coords, 0, 1) # (h w) 3
 
-        scene_center = world_coords.mean(0)
+        world_coords_real = world_coords[self.opacity>0]
+        scene_center = world_coords_real.mean(0)
 
         return scene_center.cpu()
 
@@ -91,7 +93,8 @@ class GetVirtualCam:
         world_coords = world_coords + bwd_trans.reshape(3, 1)
         world_coords = torch.movedim(world_coords, 0, 1) # (n_rays) 3
 
-        scene_center = world_coords.mean(0)
+        world_coords_real = world_coords[self.opacity > 0]
+        scene_center = world_coords_real.mean(0)
 
         return scene_center.cpu()
 

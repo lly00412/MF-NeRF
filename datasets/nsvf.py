@@ -101,6 +101,8 @@ class NSVFDataset(BaseDataset):
 
 
             print(f'Loading {len(img_paths)} {split} images ...')
+            if split == 'train':
+                print(f'Training imgs are {self.subs}.')
             for img_path, pose in tqdm(zip(img_paths, poses)):
                 c2w = np.loadtxt(pose)[:3]
                 c2w[:, 3] -= self.shift

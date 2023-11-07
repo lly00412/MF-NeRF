@@ -103,7 +103,7 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         rgbs = list(torch.chunk(rgbs, chunks=N_trunks))
 
         for t_idx in range(N_trunks):
-            if valid_mask[t_idx].sum()<20:
+            if valid_mask[t_idx].sum()<1:
                 continue
             sigmas[t_idx][valid_mask[t_idx]], _rgbs = model(xyzs[t_idx][valid_mask[t_idx]],
                                                             dirs[t_idx][valid_mask[t_idx]], **kwargs)
