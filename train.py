@@ -453,7 +453,7 @@ class NeRFSystem(LightningModule):
         mcd_preds = torch.stack(mcd_preds, 0)  # rgb: n (h w) c    depth: n (h w)
         if mcd_preds.ndim > 2:
             mcd_preds = mcd_preds.mean(-1)
-            mcd_preds = mcd_preds.cpu().numpy()
+        mcd_preds = mcd_preds.cpu().numpy()
         mcd_sigmas = np.nanstd(mcd_preds, 0)
         mcd_sigmas = torch.from_numpy(mcd_sigmas)
 
