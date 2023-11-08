@@ -302,15 +302,13 @@ def compute_roc(opt,est,intervals = 20): # input numpy array
     AUC = np.trapz(ROC, dx=1. / intervals)
     return ROC,AUC
 
-def plot_roc(ROC_dict,fig_name, is_ref_cam=False,opt_label='rgb_err',intervals = 20):
+def plot_roc(ROC_dict,fig_name, opt_label='rgb_err',intervals = 20):
     quants = [100. / intervals * t for t in range(1, intervals + 1)]
     plt.figure()
     plt.rcParams.update({'font.size': 20})
     # plot opt
     ROC_opt = ROC_dict.pop(opt_label)
     plt.plot(quants, ROC_opt, marker="^", markersize=8,  color='blue', label=opt_label)
-    if is_ref_cam:
-        ROC_dict.pop('warp_err')
     for est in ROC_dict.keys():
         plt.plot(quants, ROC_dict[est], marker="o", markersize=8, label=est)
     plt.xticks(quants)
