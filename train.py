@@ -313,9 +313,12 @@ class NeRFSystem(LightningModule):
                     self.handout_dataset.split = 'test'
                     vs_loader = self.viewselect_loader()
                     view_uncert_scores = []
+                    pbar = tqdm(total=len(self.handout_list))
                     for batch_idx, batch in enumerate(vs_loader):
                         vs_score = self.view_select_step(batch,batch_idx)
                         view_uncert_scores.append(vs_score)
+                        pbar.update(1)
+                    pbar.close()
 
                     scores = torch.cat([x.reshape(1) for x in view_uncert_scores])
                     topks = torch.topk(scores, self.hparams.view_step)
@@ -432,7 +435,7 @@ class NeRFSystem(LightningModule):
     def mcd_uncert(self, batch, mcd_val='depth', pix_idxs=None, isdense=True):
         enable_dropout(self.model.rgb_net, p=self.hparams.p)
         mcd_preds = []
-        print('Start MC-Dropout...')
+        print(f'Start MC-Dropout...\n')
         counts = 0
         # TODO: E[(x-miu)^2] = E[x^2]-miu^2
         N_passes = self.hparams.n_passes
