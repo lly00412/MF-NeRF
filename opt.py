@@ -55,10 +55,12 @@ def get_opts():
     # active learning view selection
     parser.add_argument('--view_select', action='store_true', default=False,
                         help='whether run view selection process')
-    parser.add_argument("--seed", type=int, default=349,
+    parser.add_argument("--vs_seed", type=int, default=349,
                         help='random seed to initialize the training set')
     parser.add_argument("--start", type=int, default=10,
                         help='size of initial trainset')
+    parser.add_argument("--N_vs", type=int, default=4,
+                        help='run view selection process for N times')
     parser.add_argument("--view_step", type=int, default=5,
                         help='num of views add to trainset each time')
     parser.add_argument("--epoch_step", type=int, default=5,
@@ -70,7 +72,8 @@ def get_opts():
     parser.add_argument('--vs_by', type=str, default=None,
                         choices=[None, 'random', 'warp', 'mcd_d', 'mcd_r'],
                         help='select supplemental views by random / warping uncertainty / mcdropout depth / mcdropout rgb')
-
+    parser.add_argument('--no_save_vs', action='store_true', default=False,
+                        help='whether to save vs uncertainty map')
 
     # loss options
     parser.add_argument('--loss', type=str, default='l2',
@@ -92,7 +95,10 @@ def get_opts():
     parser.add_argument("--p", type=float, default=0.2,
                         help='drop prob for mc_dropout')
 
-    # 
+    # warp settings
+    parser.add_argument("--theta", type=int, default=1,
+                        help='number of passes for mc_dropout')
+
 
     # validation options
     parser.add_argument('--eval_lpips', action='store_true', default=False,
@@ -106,6 +112,7 @@ def get_opts():
     parser.add_argument('--save_video', action='store_true', default=False,
                         help='save the render video')
 
+
     # misc
     parser.add_argument('--exp_name', type=str, default='exp',
                         help='experiment name')
@@ -113,6 +120,7 @@ def get_opts():
                         help='pretrained checkpoint to load (including optimizers, etc)')
     parser.add_argument('--weight_path', type=str, default=None,
                         help='pretrained checkpoint to load (excluding optimizers, etc)')
+
 
     # network config
     parser.add_argument('--grid', type=str, default='Hash',
