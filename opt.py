@@ -58,7 +58,7 @@ def get_opts():
     parser.add_argument("--vs_seed", type=int, default=349,
                         help='random seed to initialize the training set')
     parser.add_argument("--start", type=int, default=10,
-                        help='size of initial trainset')
+                        help='size of initial trainset, if start=0 means use the full trainset')
     parser.add_argument("--N_vs", type=int, default=4,
                         help='run view selection process for N times')
     parser.add_argument("--view_step", type=int, default=5,

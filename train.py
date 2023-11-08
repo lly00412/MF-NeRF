@@ -97,19 +97,22 @@ class NeRFSystem(LightningModule):
             create_meshgrid3d(G, G, G, False, dtype=torch.int32).reshape(-1, 3))
         self.star_time = time.time()
         self.vs_time = 0
-        if self.hparams.view_select:
+        if self.hparams.start>0:
             self.vs_log = os.path.join(f"logs/{self.hparams.dataset_name}", self.hparams.exp_name, 'vs_log.txt')
+        if self.hparams.view_select:
+            self.vs_epochs = [0]+[self.hparams.epoch_step*i-1 for i in range(1,self.hparams.N_vs)]
 
     def forward(self, batch, split, isvs=False):
         if split=='train':
             poses = self.poses[batch['img_idxs']]
             directions = self.directions[batch['pix_idxs']]
-        elif (split=='vs' and self.hparams.vs_sample_rate<1):
-            poses = batch['pose'].unsqueeze(0).repeat(len(batch['pix_idxs']),1,1)
-            directions = self.directions[batch['pix_idxs']]
         else:
             poses = batch['pose']
             directions = self.directions
+
+        if (isvs and self.hparams.vs_sample_rate<1):
+            poses = poses.unsqueeze(0).repeat(len(batch['pix_idxs']),1,1)
+            directions = directions[batch['pix_idxs']]
 
         if self.hparams.optimize_ext:
             dR = axisangle_to_R(self.dR[batch['img_idxs']])
@@ -117,6 +120,7 @@ class NeRFSystem(LightningModule):
             poses[..., 3] += self.dT[batch['img_idxs']]
 
         rays_o, rays_d = get_rays(directions, poses)
+
 
         kwargs = {'test_time': split =='test',
                   'random_bg': self.hparams.random_bg}
@@ -133,16 +137,12 @@ class NeRFSystem(LightningModule):
         dataset = dataset_dict[self.hparams.dataset_name]
         kwargs = {'root_dir': self.hparams.root_dir,
                   'downsample': self.hparams.downsample}
-        if not self.hparams.view_select:
-            self.train_dataset = dataset(split=self.hparams.split,
-                                         fewshot=0,
-                                         seed=self.hparams.vs_seed,
-                                         **kwargs)
-        else:
-            self.train_dataset = dataset(split=self.hparams.split,
-                                             fewshot=self.hparams.start,
-                                             seed=self.hparams.vs_seed,
-                                             **kwargs)
+
+        self.train_dataset = dataset(split=self.hparams.split,
+                                     fewshot=self.hparams.start,
+                                     seed=self.hparams.vs_seed,
+                                     **kwargs)
+        if self.hparams.start>0:
             with open(self.vs_log, 'a') as f:
                 f.write(f'Initial train img: {self.hparams.start}\n')
                 f.write(f'Initial train ids: {self.train_dataset.subs}\n')
@@ -166,6 +166,9 @@ class NeRFSystem(LightningModule):
                                          subs=current_train_list,
                                          seed=self.hparams.vs_seed,
                                          **kwargs)
+            self.train_dataset.batch_size = self.hparams.batch_size
+            self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
+
             with open(self.vs_log, 'a') as f:
                 f.write(f'Total train img: {len(current_train_list)}\n')
                 f.write(f'Train img ids: {current_train_list}\n')
@@ -286,13 +289,15 @@ class NeRFSystem(LightningModule):
         current_time = time.time()
         runtime = current_time - self.star_time
         self.log('train/runtime(mins)', runtime / 60, True)
+        if self.current_vs<self.hparams.N_vs:
+            self.hparams.view_select = True
 
-        if self.hparams.view_select and (self.current_vs<self.hparams.N_vs):
-            self.vs_dir = os.path.join(f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}/vs/', f'epoch{self.current_epoch}')
-            os.makedirs(self.vs_dir, exist_ok=True)
-
-            if not (self.current_epoch+1) % self.hparams.epoch_step:
-                print(f'Starting view selection Round {self.current_vs}!')
+        if self.hparams.view_select:
+            if self.current_epoch in self.vs_epochs:
+                self.vs_dir = os.path.join(f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}/vs/',
+                                           f'epoch{self.current_epoch}')
+                os.makedirs(self.vs_dir, exist_ok=True)
+                print(f'Starting view selection Round {self.current_vs}!\n')
                 vs_start = time.time()
                 if self.hparams.vs_by == 'random':
                     np.random.seed(self.hparams.vs_seed)
@@ -319,6 +324,7 @@ class NeRFSystem(LightningModule):
                 new_train_list = np.append(self.train_dataset.subs, self.handout_list[choice])
                 vs_choice = self.handout_list[choice]
                 self.handout_list = np.delete(self.handout_list, choice)
+
                 dataset = dataset_dict[self.hparams.dataset_name]
                 kwargs = {'root_dir': self.hparams.root_dir,
                           'downsample': self.hparams.downsample}
@@ -326,6 +332,12 @@ class NeRFSystem(LightningModule):
                                                  subs=new_train_list,
                                                  seed=self.hparams.vs_seed,
                                                  **kwargs)
+                self.train_dataset.batch_size = self.hparams.batch_size
+                self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
+                # define additional parameters
+                self.register_buffer('directions', self.train_dataset.directions.to(self.device))
+                self.register_buffer('poses', self.train_dataset.poses.to(self.device))
+
                 self.current_vs += 1
                 vs_end = time.time()
                 self.vs_time += vs_end-vs_start
@@ -358,7 +370,7 @@ class NeRFSystem(LightningModule):
         for ray_ids in rayloader:
             sub_batch = batch
             sub_batch['pix_idxs'] = ray_ids
-            sub_results = self(sub_batch, split='vs',isvs=True)
+            sub_results = self(sub_batch, split='test',isvs=True)
             all_results += [sub_results]
         results = {}
         for k in ['rgb','depth']:
@@ -446,55 +458,56 @@ class NeRFSystem(LightningModule):
         mcd_sigmas = torch.from_numpy(mcd_sigmas)
 
         mcd_score = torch.median(mcd_sigmas[counts > 0].flatten())
-        return  mcd_sigmas.cpu(), counts.cpu(), mcd_score.cpu()
+        return mcd_sigmas.cpu(), counts.cpu(), mcd_score.cpu()
 
     def view_select_step(self, batch,batch_nb):
-        img_id = self.hanout_dataset.subs[batch_nb]
+        torch.cuda.empty_cache()
+        img_id = self.handout_dataset.subs[batch_nb]
         img_w, img_h = self.handout_dataset.img_wh
+
+        batch['pose'] = batch['pose'].to(self.device)
 
         if self.hparams.vs_sample_rate < 1:
             total_rays = self.handout_dataset.img_wh[0] * self.handou_dataset.img_wh[1]
+            n_samples = int(self.hparams.vs_sample_rate * total_rays)
+            torch.random.manual_seed(self.hparams.vs_seed)
+            pix_idxs = torch.randperm(total_rays)[:n_samples]
+            results = self.render_by_rays(pix_idxs, batch, self.hparams.vs_batch_size)
+            results['pix_idxs'] = pix_idxs
+        else:
+            results = self(batch, split='test',isvs=True)
+            results['pix_idxs'] = None
+
+        if self.hparams.vs_by == 'warp':
+            K = self.handout_dataset.K
+            sigmas, counts, u_score = self.warp_uncert(batch, results,
+                                                       img_h, img_w, K,
+                                                        isdense=not (self.hparams.vs_sample_rate<1))
+        if self.hparams.vs_by in ['mcd_d', 'mcd_r']:
+            mcd_val = 'depth' if self.hparams.vs_by=='mcd_d' else 'rgb'
+            sigmas, counts, u_score = self.mcd_uncert(batch,mcd_val,results['pix_idxs'],
+                                                      isdense=not (self.hparams.vs_sample_rate<1))
+
+        # opacity = results['opacity'].cpu()
+        # print(f'img {img_id} uncert score:{u_score}')
+        # print(f'Total resolution: {img_h * img_w}')
+        # print(f'count pxs: {(counts > 0).sum()}')
+        # print(f'valid pxs: {(opacity > 0).sum()}')
+
+        if not self.hparams.no_save_vs:
+            sigmas = err2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
+            sigmas = sigmas.squeeze(1)
+            counts = counts.cpu().numpy()
+            u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
             if self.hparams.vs_sample_rate < 1:
-                n_samples = int(self.hparams.vs_sample_rate * total_rays)
-                # pix_idxs = np.random.choice(self.test_dataset.img_wh[0] * self.test_dataset.img_wh[1], self.hparams.vs_batch_size, replace=False)
-                torch.random.manual_seed(self.hparams.vs_seed)
-                pix_idxs = torch.randperm(total_rays)[:n_samples]
-                results = self.render_by_rays(pix_idxs, batch, self.hparams.vs_batch_size)
-                results['pix_idxs'] = pix_idxs
+                u_img[results['pix_idxs'].cpu().numpy()][counts > 0] = sigmas
+                u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
             else:
-                results = self(batch, split='test',isvs=True)
-                results['pix_idxs'] = None
+                u_img[counts > 0] = sigmas
+                u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
+            imageio.imsave(os.path.join(self.vs_dir, f'{img_id:03d}_vsu.png'), u_img)
 
-            if self.hparams.vs_by == 'warp':
-                K = self.handout_dataset.K
-                sigmas, counts, u_score = self.warp_uncert(batch, results,
-                                                           img_h, img_w, K,
-                                                            isdense=not (self.hparams.vs_sample_rate<1))
-            if self.hparams.vs_by in ['mcd_d', 'mcd_r']:
-                mcd_val = 'depth' if self.hparams.vs_by=='mcd_d' else 'rgb'
-                sigmas, counts, u_score = self.mcd_uncert(batch,mcd_val,results['pix_idxs'],
-                                                          isdense=not (self.hparams.vs_sample_rate<1))
-
-            opacity = results['opacity'].cpu()
-            print(f'img {img_id} uncert score:{u_score}')
-            print(f'Total resolution: {img_h * img_w}')
-            print(f'count pxs: {(counts > 0).sum()}')
-            print(f'valid pxs: {(opacity > 0).sum()}')
-
-            if not self.hparams.no_save_vs:
-                sigmas = err2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
-                sigmas = sigmas.squeeze(1)
-                counts = counts.cpu().numpy()
-                u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
-                if self.hparams.vs_sample_rate < 1:
-                    u_img[results['pix_idxs'].cpu().numpy()][counts > 0] = sigmas
-                    u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
-                else:
-                    u_img[counts > 0] = sigmas
-                    u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
-                imageio.imsave(os.path.join(self.vs_dir, f'{img_id:03d}_vsu.png'), u_img)
-
-            return u_score
+        return u_score
 
     def validation_step(self, batch, batch_nb):
         img_id = batch['img_idxs']
@@ -721,7 +734,7 @@ if __name__ == '__main__':
                       devices=hparams.num_gpus,
                       strategy=DDPPlugin(find_unused_parameters=False)
                                if hparams.num_gpus>1 else None,
-                      num_sanity_val_steps=-1 if hparams.val_only else 0,
+                      num_sanity_val_steps=-1 if (hparams.val_only or hparams.weight_path) else 0,
                       precision=16)
 
     trainer.fit(system)
