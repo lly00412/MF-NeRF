@@ -425,6 +425,7 @@ class NeRFSystem(LightningModule):
         warp_sigmas = np.nanstd(warp_depths.cpu().numpy(), axis=0)
         warp_sigmas = torch.from_numpy(warp_sigmas)
 
+        counts = counts.cpu()
         warp_score = torch.median(warp_sigmas[counts > 0].flatten())
         return warp_sigmas.cpu(), counts.cpu(), warp_score.cpu()
 
@@ -457,6 +458,7 @@ class NeRFSystem(LightningModule):
         mcd_sigmas = np.nanstd(mcd_preds, 0)
         mcd_sigmas = torch.from_numpy(mcd_sigmas)
 
+        counts = counts.cpu()
         mcd_score = torch.median(mcd_sigmas[counts > 0].flatten())
         return mcd_sigmas.cpu(), counts.cpu(), mcd_score.cpu()
 
