@@ -237,6 +237,8 @@ class NeRFSystem(LightningModule):
         return loss
 
     def on_validation_start(self):
+        print(self.current_epoch)
+
         torch.cuda.empty_cache()
         if self.hparams.view_select:
             self.hparams.no_save_test = True
@@ -421,7 +423,7 @@ class NeRFSystem(LightningModule):
             warp_u = torch.full_like(warp_sigmas,float("Inf"))
             warp_u[counts>0] = warp_sigmas[counts>0]
 
-            warp_score = torch.median(warp_sigmas.flatten())
+            warp_score = torch.median(warp_sigmas[counts>0].flatten())
             logs['warp'] = warp_score.cpu()
             img_id = self.test_dataset.subs[idx]
             print(f'img {img_id} warp score:{warp_score.cpu()}')
@@ -429,18 +431,18 @@ class NeRFSystem(LightningModule):
             print(f'count pxs: {(counts>0).sum()}')
             print(f'valid pxs: {(opacity > 0).sum()}')
 
-            warp_sigmas = err2img(warp_sigmas.cpu().numpy())   # (n_rays) 1 3
+            warp_sigmas = err2img(warp_sigmas[counts>0].cpu().numpy())   # (n_rays) 1 3
             warp_sigmas = warp_sigmas.squeeze(1)
+            counts = counts.cpu().numpy()
             if self.hparams.vs_sample_rate<1:
                 warp_img = np.zeros((h*w, 3)).astype(np.uint8)
-                warp_img[results['pix_idxs'].cpu().numpy()] = warp_sigmas
+                warp_img[results['pix_idxs'].cpu().numpy()][counts>0] = warp_sigmas
                 warp_img = rearrange(warp_img, '(h w) c -> h w c', h=h)
             else:
-                warp_img = rearrange(warp_sigmas, '(h w) c -> h w c', h=h)
+                warp_img = np.zeros((h * w, 3)).astype(np.uint8)
+                warp_img[counts>0] = warp_sigmas
+                warp_img = rearrange(warp_img, '(h w) c -> h w c', h=h)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warpu.png'),warp_img)
-            # n_px = len(results['pix_idxs'])
-            # print(f'total pxs: {h*w}')
-            # print(f'sample pxs: {n_px}' )
 
         ###################################################
         #              MC-Dropout
@@ -450,9 +452,9 @@ class NeRFSystem(LightningModule):
             idx = batch['img_idxs']
 
             enable_dropout(self.model.rgb_net,p=self.hparams.p)
-            mcd_rgb_preds = []
+            mcd_preds = []
             print('Start MC-Dropout...')
-
+            counts = 0
             #TODO: E[(x-miu)^2] = E[x^2]-miu^2
             N_passes = self.hparams.n_passes
             for N in trange(N_passes):
@@ -460,33 +462,44 @@ class NeRFSystem(LightningModule):
                     mcd_results = self.render_by_rays(results['pix_idxs'],batch,self.hparams.vs_batch_size)
                 else:
                     mcd_results = self(batch,split='test')
-                mcd_rgb_preds.append(mcd_results[self.hparams.vals]) # (h w) c
+                opacity = mcd_results['opacity']
+                mcd_pred = mcd_results[self.hparams.vals]
+                _mcd_pred = torch.full_like(mcd_pred,float("nan"))
+                _mcd_pred[opacity>0]=mcd_pred[opacity>0]
+                counts += (opacity>0)
+                mcd_preds.append(_mcd_pred) # (h w) c
                 # mcd += mcd_results['rgb']
                 # mcd_squre += mcd_results['rgb'] ** 2
                 del mcd_results
-            mcd_rgb_preds = torch.stack(mcd_rgb_preds,0) #rgb: n (h w) c    depth: n (h w)
-            if mcd_rgb_preds.ndim>2:
-                mcd_rgb_preds = mcd_rgb_preds.mean(-1)
-            results['mcd'] = mcd_rgb_preds.std(0) # (h w)
             close_dropout(self.model.rgb_net)
+            mcd_preds = torch.stack(mcd_preds,0) #rgb: n (h w) c    depth: n (h w)
+            if mcd_preds.ndim>2:
+                mcd_preds = mcd_preds.mean(-1)
+                mcd_preds = mcd_preds.cpu().numpy()
+            mcd_sigmas = np.nanstd(mcd_preds, 0)
+            mcd_sigmas = torch.from_numpy(mcd_sigmas)
+            results['mcd'] = mcd_sigmas
+            counts = counts.cpu()
 
-            mcd_score = torch.median(results['mcd'].flatten())
+            mcd_score = torch.median(mcd_sigmas[counts>0].flatten())
             logs['mcd'] = mcd_score.cpu()
 
-            mcd_preds = results['mcd'].cpu().numpy()
-            mcd_preds = err2img(mcd_preds) # n_rays, 3
-            mcd_preds = mcd_preds.squeeze(1)
+            mcd_sigmas = err2img(mcd_sigmas[counts>0].cpu().numpy()) # n_rays, 1, 3
+            mcd_sigmas = mcd_sigmas.squeeze(1)
+            counts = counts.numpy()
             if self.hparams.vs_sample_rate<1:
                 mcd_img = np.zeros((h * w, 3)).astype(np.uint8)
-                mcd_img[results['pix_idxs'].cpu().numpy()] = mcd_preds
+                mcd_img[results['pix_idxs'].cpu().numpy()][counts>0] = mcd_sigmas
                 mcd_img = rearrange(mcd_img, '(h w) c -> h w c', h=h)
             else:
-                mcd_img = rearrange(mcd_preds, '(h w) c -> h w c', h=h)
+                mcd_img = np.zeros((h * w, 3)).astype(np.uint8)
+                mcd_img[counts>0] = mcd_sigmas
+                mcd_img = rearrange(mcd_img, '(h w) c -> h w c', h=h)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_mcd.png'), mcd_img)
-            # n_px = len(results['pix_idxs'])
-            # print(f'total pxs: {h * w}')
-            # print(f'sample pxs: {n_px}')
-
+            img_id = self.test_dataset.subs[idx]
+            print(f'img {img_id} warp score:{mcd_score.cpu()}')
+            print(f'Total pxs: {h * w}')
+            print(f'count pxs: {(counts > 0).sum()}')
 
 
         if self.hparams.plot_roc:
@@ -729,7 +742,10 @@ if __name__ == '__main__':
         hparams.no_save_test = False
         hparams.train_img = view_choices+system.train_dataset.subs.tolist()
 
-        hparams.exp_name = os.path.join(ori_exp_name, hparams.pick_by, 'retrain')
+        hparams.exp_name = os.path.join(ori_exp_name, hparams.pick_by)
+        if hparams.pick_by== 'mcd':
+            hparams.exp_name = os.path.join(hparams.exp_name, hparams.vals)
+        hparams.exp_name = os.path.join(hparams.exp_name, 'retrain')
 
         hparams.pick_by = None
 

@@ -15,48 +15,48 @@ fewshot_no=(30)
 
 #### train the base line
 
-for SCENES in ${scenes[@]}
-do
-  echo ${SCENES}
-  for FS in ${fewshot_no}
-  do
-    echo train_on_${FS}_imgs
-  ### mfnerf T20 128ch
-    python train.py \
-      --root_dir ${ROOT_DIR}/${SCENES} \
-      --dataset_name nsvf \
-      --fewshot ${FS} --fewshot_seed 489 \
-      --exp_name Synthetic_NSVF/Hash/${losses}/fewshot${FS}/${SCENES}/ \
-      --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
-      --rgb_channels 128 --rgb_layers 2 \
-      --loss ${losses}
-  done
-done
+#for SCENES in ${scenes[@]}
+#do
+#  echo ${SCENES}
+#  for FS in ${fewshot_no}
+#  do
+#    echo train_on_${FS}_imgs
+#  ### mfnerf T20 128ch
+#    python train.py \
+#      --root_dir ${ROOT_DIR}/${SCENES} \
+#      --dataset_name nsvf \
+#      --fewshot ${FS} --fewshot_seed 489 \
+#      --exp_name Synthetic_NSVF/Hash/${losses}/fewshot${FS}/${SCENES}/ \
+#      --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
+#      --rgb_channels 128 --rgb_layers 2 \
+#      --loss ${losses}
+#  done
+#done
 #
 
 ############### randon choice
 
-for SCENES in ${scenes[@]}
-do
-  echo ${SCENES}
-  for FS in ${fewshot_no}
-  do
-    echo train_on_${FS}_imgs
-  ### mfnerf T20 128ch
-    python train.py \
-      --root_dir ${ROOT_DIR}/${SCENES} \
-      --dataset_name nsvf \
-      --fewshot ${FS} --fewshot_seed 489 \
-      --exp_name Synthetic_NSVF/Hash/${losses}/fewshot${FS}/${SCENES}/ \
-      --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
-      --rgb_channels 128 --rgb_layers 2 \
-      --loss ${losses} \
-      --view_select --ckpt ${CKPT_DIR}/${SCENES}/epoch=19.ckpt \
-      --pick_by random \
-      --n_view 5 \
-      --retrain
-  done
-done
+#for SCENES in ${scenes[@]}
+#do
+#  echo ${SCENES}
+#  for FS in ${fewshot_no}
+#  do
+#    echo train_on_${FS}_imgs
+#  ### mfnerf T20 128ch
+#    python train.py \
+#      --root_dir ${ROOT_DIR}/${SCENES} \
+#      --dataset_name nsvf \
+#      --fewshot ${FS} --fewshot_seed 489 \
+#      --exp_name Synthetic_NSVF/Hash/${losses}/fewshot${FS}/${SCENES}/ \
+#      --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
+#      --rgb_channels 128 --rgb_layers 2 \
+#      --loss ${losses} \
+#      --view_select --ckpt ${CKPT_DIR}/${SCENES}/epoch=19.ckpt \
+#      --pick_by random \
+#      --n_view 5 \
+#      --retrain
+#  done
+#done
 
 
 ################## pick by warp
