@@ -143,6 +143,10 @@ class NeRFSystem(LightningModule):
                                              fewshot=self.hparams.start,
                                              seed=self.hparams.vs_seed,
                                              **kwargs)
+            with open(self.vs_log, 'a') as f:
+                f.write(f'Initial train img: {self.hparams.start}\n')
+                f.write(f'Initial train ids: {self.train_dataset.subs}\n')
+                f.close()
 
         self.current_vs = 0
 
