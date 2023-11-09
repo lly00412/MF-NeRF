@@ -58,6 +58,11 @@ class ColmapDataset(BaseDataset):
         else:
             folder = 'images'
         # read successfully reconstructed images and ignore others
+        if 'llff' in self.root_dir and self.downsample<1: # only has 4 and 8, downsample shold be 0.25 and 0.125
+            folder = f'images_{int(1/self.downsample)}'
+        else:
+            folder = 'images'
+
         img_paths = [os.path.join(self.root_dir, folder, name)
                      for name in sorted(img_names)]
         self.N_vocab = len(img_paths)

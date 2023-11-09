@@ -6,13 +6,14 @@ class BaseDataset(Dataset):
     """
     Define length and sampling method
     """
-    def __init__(self, root_dir, split='train', downsample=1.0,fewshot=0,seed=340,subs=None):
+    def __init__(self, root_dir, split='train', downsample=1.0,fewshot=0,seed=340,subs=None,p=None):
         self.root_dir = root_dir
         self.split = split
         self.downsample = downsample
         self.fewshot = fewshot
         self.seed = seed
         self.subs = subs
+        self.p = p
 
     def read_intrinsics(self):
         raise NotImplementedError
@@ -29,6 +30,8 @@ class BaseDataset(Dataset):
                 img_idxs = np.random.choice(len(self.poses), self.batch_size)
             elif self.ray_sampling_strategy == 'same_image': # randomly select ONE image
                 img_idxs = np.random.choice(len(self.poses), 1)[0]
+            elif self.ray_sampling_strategy == 'more_new_image': # new coming img has higher probability
+                img_idxs = np.random.choice(len(self.poses), self.batch_size,self.p)
             # randomly select pixels
             pix_idxs = np.random.choice(self.img_wh[0]*self.img_wh[1], self.batch_size, replace=False)
             rays = self.rays[img_idxs, pix_idxs]
