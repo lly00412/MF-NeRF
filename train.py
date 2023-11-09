@@ -205,8 +205,8 @@ class NeRFSystem(LightningModule):
         if self.hparams.optimize_ext:
             opts += [FusedAdam([self.dR, self.dT], 1e-6)] # learning rate is hard-coded
         net_sch = CosineAnnealingLR(self.net_opt,
-                                    self.hparams.num_epochs-1,
-                                    self.hparams.lr*0.01)
+                                    self.hparams.num_epochs,
+                                    self.hparams.lr/30)
 
         return opts, [net_sch]
 
@@ -289,8 +289,6 @@ class NeRFSystem(LightningModule):
         current_time = time.time()
         runtime = current_time - self.star_time
         self.log('train/runtime(mins)', runtime / 60, True)
-        if self.current_vs<self.hparams.N_vs:
-            self.hparams.view_select = True
 
         if self.hparams.view_select:
             if self.current_epoch in self.vs_epochs:
@@ -357,6 +355,9 @@ class NeRFSystem(LightningModule):
                     f.write(f'Selected views: {vs_choice}\n')
                     f.write(f'Time for selection process: {time_cost}\n')
                     f.close()
+
+                if not (self.current_vs < self.hparams.N_vs):
+                    self.hparams.view_select = False
 
     def render_virtual_cam(self,new_c2w, batch):
         v_batch = {'pose': new_c2w.to(batch['pose']),
