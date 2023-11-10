@@ -3,7 +3,7 @@
 export ROOT_DIR=/mnt/Data2/datasets/nerf_llff_data/
 export BASE_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/nerf_llff/Hash/res0.25/fewshot10/
 export CKPT_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/nerf_llff/Hash/fewshot20/
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 #scenes=(fortress horns room trex)
 scenes=(room)
 
@@ -79,6 +79,7 @@ python train.py \
     --view_select --vs_seed 349 \
     --random_bg \
     --pre_train_epoch 20 \
+    --ray_sampling_strategy more_new_images \
     --start 10 --N_vs 5 --view_step 2 --epoch_step 20 \
     --weight_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \
     --vs_by warp --theta 1 \
