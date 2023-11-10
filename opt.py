@@ -77,6 +77,8 @@ def get_opts():
                         help='select supplemental views by random / warping uncertainty / mcdropout depth / mcdropout rgb')
     parser.add_argument('--no_save_vs', action='store_true', default=False,
                         help='whether to save vs uncertainty map')
+    parser.add_argument("--train_img", type=int, default=None, nargs='+',
+                        help='only use training imgs listed here')
 
     # loss options
     parser.add_argument('--loss', type=str, default='l2',
