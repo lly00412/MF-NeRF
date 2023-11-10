@@ -30,8 +30,8 @@ class BaseDataset(Dataset):
                 img_idxs = np.random.choice(len(self.poses), self.batch_size)
             elif self.ray_sampling_strategy == 'same_image': # randomly select ONE image
                 img_idxs = np.random.choice(len(self.poses), 1)[0]
-            elif self.ray_sampling_strategy == 'more_new_image': # new coming img has higher probability
-                img_idxs = np.random.choice(len(self.poses), self.batch_size,self.p)
+            elif self.ray_sampling_strategy == 'more_new_images': # new coming img has higher probability
+                img_idxs = np.random.choice(len(self.poses), self.batch_size,p=self.p)
             # randomly select pixels
             pix_idxs = np.random.choice(self.img_wh[0]*self.img_wh[1], self.batch_size, replace=False)
             rays = self.rays[img_idxs, pix_idxs]

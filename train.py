@@ -133,6 +133,8 @@ class NeRFSystem(LightningModule):
 
         return render(self.model, rays_o, rays_d, **kwargs)
 
+
+
     def setup(self, stage):
         dataset = dataset_dict[self.hparams.dataset_name]
         kwargs = {'root_dir': self.hparams.root_dir,
@@ -166,8 +168,6 @@ class NeRFSystem(LightningModule):
                                          subs=current_train_list,
                                          seed=self.hparams.vs_seed,
                                          **kwargs)
-            self.train_dataset.batch_size = self.hparams.batch_size
-            self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
 
             with open(self.vs_log, 'a') as f:
                 f.write(f'Total train img: {len(current_train_list)}\n')
@@ -178,6 +178,17 @@ class NeRFSystem(LightningModule):
 
         self.train_dataset.batch_size = self.hparams.batch_size
         self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
+        if self.hparams.ray_sampling_strategy == "more_new_images":
+            N_train = len(self.train_dataset.subs)
+            p = np.ones(N_train)
+            trained_epochs = [self.hparams.pre_train_epoch]*self.hparams.start + [0]*(N_train-self.hparams.start)
+            trained_epochs = np.array(trained_epochs)+self.hparams.epoch_step
+            p /= trained_epochs
+            p /= p.sum()
+            self.train_dataset.p = p
+            self.train_dataset.trained_epochs = trained_epochs
+
+
 
         self.test_dataset = dataset(split='test', **kwargs)
 
@@ -200,13 +211,20 @@ class NeRFSystem(LightningModule):
             if n not in ['dR', 'dT']: net_params += [p]
 
         opts = []
-        self.net_opt = FusedAdam(net_params, self.hparams.lr, eps=1e-15)
+        # self.net_opt = FusedAdam(net_params, self.hparams.lr, eps=1e-15)
+        self.net_opt = torch.optim.Adam(net_params, self.hparams.lr, betas=(0.9, 0.999))
         opts += [self.net_opt]
         if self.hparams.optimize_ext:
             opts += [FusedAdam([self.dR, self.dT], 1e-6)] # learning rate is hard-coded
-        net_sch = CosineAnnealingLR(self.net_opt,
-                                    self.hparams.num_epochs,
-                                    self.hparams.lr/30)
+        # net_sch = CosineAnnealingLR(self.net_opt,
+        #                             self.hparams.num_epochs,
+        #                             self.hparams.lr*0.01)
+        #net_sch = torch.optim.lr_scheduler.StepLR(self.net_opt,2000,0.1)
+        net_sch = {
+            'scheduler': torch.optim.lr_scheduler.StepLR(self.net_opt,10000,0.1),
+            'interval': 'step',  # or 'epoch'
+            'frequency': 1
+        }
 
         return opts, [net_sch]
 
@@ -285,79 +303,8 @@ class NeRFSystem(LightningModule):
         if self.save_output:
             self.out_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}/output/'
             os.makedirs(self.out_dir, exist_ok=True)
-    def on_validation_epoch_start(self):
-        current_time = time.time()
-        runtime = current_time - self.star_time
-        self.log('train/runtime(mins)', runtime / 60, True)
+    # def on_validation_epoch_start(self):
 
-        if self.hparams.view_select:
-            if self.current_epoch in self.vs_epochs:
-                self.vs_dir = os.path.join(f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}/vs/',
-                                           f'epoch{self.current_epoch}')
-                os.makedirs(self.vs_dir, exist_ok=True)
-                print(f'Starting view selection Round {self.current_vs}!\n')
-                vs_start = time.time()
-                if self.hparams.vs_by == 'random':
-                    np.random.seed(self.hparams.vs_seed)
-                    choice = np.random.choice(len(self.handout_list), self.hparams.view_step, replace=False)
-                else:
-                    dataset = dataset_dict[self.hparams.dataset_name]
-                    kwargs = {'root_dir': self.hparams.root_dir,
-                              'downsample': self.hparams.downsample}
-                    self.handout_dataset = dataset(split='train',
-                                                   subs = self.handout_list,
-                                                   seed=self.hparams.vs_seed,
-                                                    **kwargs)
-                    self.handout_dataset.split = 'test'
-                    vs_loader = self.viewselect_loader()
-                    view_uncert_scores = []
-                    pbar = tqdm(total=len(self.handout_list))
-                    for batch_idx, batch in enumerate(vs_loader):
-                        vs_score = self.view_select_step(batch,batch_idx)
-                        view_uncert_scores.append(vs_score)
-                        pbar.update(1)
-                    pbar.close()
-
-                    scores = torch.cat([x.reshape(1) for x in view_uncert_scores])
-                    topks = torch.topk(scores, self.hparams.view_step)
-                    choice = topks.indices.numpy()
-
-                new_train_list = np.append(self.train_dataset.subs, self.handout_list[choice])
-                vs_choice = self.handout_list[choice]
-                self.handout_list = np.delete(self.handout_list, choice)
-
-                dataset = dataset_dict[self.hparams.dataset_name]
-                kwargs = {'root_dir': self.hparams.root_dir,
-                          'downsample': self.hparams.downsample}
-                self.train_dataset = dataset(split=self.hparams.split,
-                                                 subs=new_train_list,
-                                                 seed=self.hparams.vs_seed,
-                                                 **kwargs)
-                self.train_dataset.batch_size = self.hparams.batch_size
-                self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
-                # define additional parameters
-                self.register_buffer('directions', self.train_dataset.directions.to(self.device))
-                self.register_buffer('poses', self.train_dataset.poses.to(self.device))
-
-                self.current_vs += 1
-                vs_end = time.time()
-                self.vs_time += vs_end-vs_start
-                self.log('vs/runtime(mins)', self.vs_time/60)
-
-                time_cost = time.strftime("%H:%M:%S", time.gmtime(vs_end-vs_start))
-                print(f'View selection by {self.hparams.vs_by}:  {vs_choice}')
-                print('Time for selection process: {}'.format(time_cost))
-
-                with open(self.vs_log, 'a') as f:
-                    f.write(f'VS Round {self.current_vs}\n')
-                    f.write(f'View Select by: {self.hparams.vs_by}\n')
-                    f.write(f'Sample rate: {self.hparams.vs_sample_rate}')
-                    f.write(f'Selected views: {vs_choice}\n')
-                    f.write(f'Time for selection process: {time_cost}\n')
-                    f.close()
-
-                if not (self.current_vs < self.hparams.N_vs):
-                    self.hparams.view_select = False
 
     def render_virtual_cam(self,new_c2w, batch):
         v_batch = {'pose': new_c2w.to(batch['pose']),
@@ -693,6 +640,93 @@ class NeRFSystem(LightningModule):
                 for key in AUCs.keys():
                     f.write(f' {key} auc =  {AUCs[key] * 100.:.4f}\n')
                 f.close()
+
+        # do view selection
+
+        current_time = time.time()
+        runtime = current_time - self.star_time
+        self.log('train/runtime(mins)', runtime / 60, True)
+
+        if self.hparams.view_select:
+            if self.current_epoch in self.vs_epochs:
+                if self.hparams.ray_sampling_strategy == "more_new_images":
+                    trained_epochs = self.train_dataset.trained_epochs
+                self.vs_dir = os.path.join(f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}/vs/',
+                                           f'epoch{self.current_epoch}')
+                os.makedirs(self.vs_dir, exist_ok=True)
+                print(f'Starting view selection Round {self.current_vs}!\n')
+                vs_start = time.time()
+                if self.hparams.vs_by == 'random':
+                    np.random.seed(self.hparams.vs_seed)
+                    choice = np.random.choice(len(self.handout_list), self.hparams.view_step, replace=False)
+                else:
+                    dataset = dataset_dict[self.hparams.dataset_name]
+                    kwargs = {'root_dir': self.hparams.root_dir,
+                              'downsample': self.hparams.downsample}
+                    self.handout_dataset = dataset(split='train',
+                                                   subs=self.handout_list,
+                                                   seed=self.hparams.vs_seed,
+                                                   **kwargs)
+                    self.handout_dataset.split = 'test'
+                    vs_loader = self.viewselect_loader()
+                    view_uncert_scores = []
+                    pbar = tqdm(total=len(self.handout_list))
+                    for batch_idx, batch in enumerate(vs_loader):
+                        vs_score = self.view_select_step(batch, batch_idx)
+                        view_uncert_scores.append(vs_score)
+                        pbar.update(1)
+                    pbar.close()
+
+                    scores = torch.cat([x.reshape(1) for x in view_uncert_scores])
+                    topks = torch.topk(scores, self.hparams.view_step)
+                    choice = topks.indices.numpy()
+
+                new_train_list = np.append(self.train_dataset.subs, self.handout_list[choice])
+                vs_choice = self.handout_list[choice]
+                self.handout_list = np.delete(self.handout_list, choice)
+
+                dataset = dataset_dict[self.hparams.dataset_name]
+                kwargs = {'root_dir': self.hparams.root_dir,
+                          'downsample': self.hparams.downsample}
+                self.train_dataset = dataset(split=self.hparams.split,
+                                             subs=new_train_list,
+                                             seed=self.hparams.vs_seed,
+                                             **kwargs)
+                self.train_dataset.batch_size = self.hparams.batch_size
+                self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
+                if self.hparams.ray_sampling_strategy == "more_new_images":
+                    N_train = len(self.train_dataset.subs)
+                    p = np.ones(N_train)
+                    trained_epochs = np.append(trained_epochs, np.zeros(self.hparams.view_step))
+                    trained_epochs = trained_epochs + self.hparams.epoch_step
+                    p /= trained_epochs
+                    p /= p.sum()
+                    self.train_dataset.p = p
+                    self.train_dataset.trained_epochs = trained_epochs
+
+                # define additional parameters
+                self.register_buffer('directions', self.train_dataset.directions.to(self.device))
+                self.register_buffer('poses', self.train_dataset.poses.to(self.device))
+
+                self.current_vs += 1
+                vs_end = time.time()
+                self.vs_time += vs_end - vs_start
+                self.log('vs/runtime(mins)', self.vs_time / 60)
+
+                time_cost = time.strftime("%H:%M:%S", time.gmtime(vs_end - vs_start))
+                print(f'View selection by {self.hparams.vs_by}:  {vs_choice}')
+                print('Time for selection process: {}'.format(time_cost))
+
+                with open(self.vs_log, 'a') as f:
+                    f.write(f'VS Round {self.current_vs}\n')
+                    f.write(f'View Select by: {self.hparams.vs_by}\n')
+                    f.write(f'Sample rate: {self.hparams.vs_sample_rate}')
+                    f.write(f'Selected views: {vs_choice}\n')
+                    f.write(f'Time for selection process: {time_cost}\n')
+                    f.close()
+
+                if not (self.current_vs < self.hparams.N_vs):
+                    self.hparams.view_select = False
 
     def get_progress_bar_dict(self):
         # don't show the version number

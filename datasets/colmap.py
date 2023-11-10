@@ -53,18 +53,24 @@ class ColmapDataset(BaseDataset):
         imdata = read_images_binary(os.path.join(self.root_dir, 'sparse/0/images.bin'))
         img_names = [imdata[k].name for k in imdata]
         perm = np.argsort(img_names)
+
         if '360_v2' in self.root_dir and self.downsample<1: # mipnerf360 data
             folder = f'images_{int(1/self.downsample)}'
         else:
             folder = 'images'
         # read successfully reconstructed images and ignore others
-        if 'llff' in self.root_dir and self.downsample<1: # only has 4 and 8, downsample shold be 0.25 and 0.125
+        if 'llff' in self.root_dir and self.downsample<1: # only has 4,8,16, downsample should be 0.25,0.125,0.0625
             folder = f'images_{int(1/self.downsample)}'
         else:
             folder = 'images'
 
         img_paths = [os.path.join(self.root_dir, folder, name)
                      for name in sorted(img_names)]
+
+        if 'llff' in self.root_dir:
+            if self.downsample==0.25 or self.downsample==0.125:
+                img_paths = [os.path.splitext(img_path)[0]+'.png' for img_path in img_paths]
+
         self.N_vocab = len(img_paths)
         w2c_mats = []
         bottom = np.array([[0, 0, 0, 1.]])
