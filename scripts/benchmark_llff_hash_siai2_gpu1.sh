@@ -1,8 +1,8 @@
 #!/bin/bash
 
 export ROOT_DIR=/data/datasets/nerf_llff_data/
-export BASE_DIR=~/Desktop/projects/MF-NeRF/ckpts/colmap/nerf_llff/Hash/res0.25/fewshot10/
-export CKPT_DIR=~/Desktop/projects/MF-NeRF/ckpts/colmap/nerf_llff/Hash/fewshot20/
+export BASE_DIR=~/Desktop/projects/MF-NeRF/ckpts/nerf_llff/Hash/res0.25/fewshot10/
+export CKPT_DIR=~/Desktop/projects/MF-NeRF/ckpts/nerf_llff/Hash/fewshot20/
 export CUDA_VISIBLE_DEVICES=0
 scenes=(fortress horns leaves)
 #scenes=(room)
