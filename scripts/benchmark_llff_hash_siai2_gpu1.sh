@@ -89,7 +89,7 @@ scenes=(fortress horns leaves)
 for SCENES in ${scenes[@]}
 do
 echo ${SCENES}
-python python train_v2.py \
+python train_v2.py \
     --root_dir ${ROOT_DIR}/${SCENES} \
     --dataset_name colmap \
     --downsample 0.25 \
@@ -110,7 +110,7 @@ done
 for SCENES in ${scenes[@]}
 do
 echo ${SCENES}
-python python train_v2.py \
+python train_v2.py \
     --root_dir ${ROOT_DIR}/${SCENES} \
     --dataset_name colmap \
     --downsample 0.25 \
