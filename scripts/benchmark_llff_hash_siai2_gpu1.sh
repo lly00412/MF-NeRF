@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 export ROOT_DIR=/data/datasets/nerf_llff_data/
 export BASE_DIR=~/Desktop/projects/MF-NeRF/ckpts/nerf_llff/Hash/res0.25/fewshot10/
