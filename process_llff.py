@@ -3,7 +3,7 @@ import glob
 import shutil
 
 if __name__ == '__main__':
-    dataset_dir = '/mnt/Data2/datasets/nerf_llff_data/'
+    dataset_dir = '/data/datasets/nerf_llff_data/'
     scenes=['fern','flower','fortress', 'horns', 'leaves','orchids','room','trex']
     for scene in scenes:
         img_root = os.path.join(dataset_dir,scene,'images')
