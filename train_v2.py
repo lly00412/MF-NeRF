@@ -366,7 +366,7 @@ class NeRFSystem(LightningModule):
         warp_sigmas = torch.from_numpy(warp_sigmas)
 
         counts = counts.cpu()
-        warp_score = torch.mean(warp_sigmas[counts > 0].flatten())
+        warp_score = torch.median(warp_sigmas[counts > 0].flatten())
         return warp_sigmas.cpu(), counts.cpu(), warp_score.cpu()
 
     def mcd_uncert(self, batch, mcd_val='depth', pix_idxs=None, isdense=True):
@@ -399,7 +399,7 @@ class NeRFSystem(LightningModule):
         mcd_sigmas = torch.from_numpy(mcd_sigmas)
 
         counts = counts.cpu()
-        mcd_score = torch.mean(mcd_sigmas[counts > 0].flatten())
+        mcd_score = torch.median(mcd_sigmas[counts > 0].flatten())
         return mcd_sigmas.cpu(), counts.cpu(), mcd_score.cpu()
 
     def view_select_step(self, batch,batch_nb):
@@ -724,6 +724,7 @@ if __name__ == '__main__':
             hparams.val_only=True
             hparams.exp_name = os.path.join(hparams.exp_name, hparams.vs_by)
     else:
+        current_vs = 1
         N_vs = 1
 
     ori_exp_name = hparams.exp_name

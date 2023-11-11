@@ -67,9 +67,9 @@ class ColmapDataset(BaseDataset):
         img_paths = [os.path.join(self.root_dir, folder, name)
                      for name in sorted(img_names)]
 
-        if 'llff' in self.root_dir:
-            if self.downsample==0.25 or self.downsample==0.125:
-                img_paths = [os.path.splitext(img_path)[0]+'.png' for img_path in img_paths]
+        # if 'llff' in self.root_dir:
+        #     if self.downsample==0.25 or self.downsample==0.125:
+        #         img_paths = [os.path.splitext(img_path)[0]+'.png' for img_path in img_paths]
 
         self.N_vocab = len(img_paths)
         w2c_mats = []
