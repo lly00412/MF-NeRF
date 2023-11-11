@@ -73,7 +73,7 @@ python train.py \
     --dataset_name colmap \
     --downsample 0.25 \
     --exp_name nerf_llff/Hash/res0.25/fewshot20/${SCENES}/ \
-    --num_epochs 100 --batch_size 4096 --scale 16.0 --lr 2e-2 --eval_lpips \
+    --num_epochs 20 --batch_size 4096 --scale 16.0 --lr 2e-2 --eval_lpips \
     --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
     --rgb_channels 64 --rgb_layers 2 \
     --view_select --vs_seed 349 \
