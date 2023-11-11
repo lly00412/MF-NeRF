@@ -354,13 +354,13 @@ class NeRFSystem(LightningModule):
             new_c2w = Vcam.get_near_c2w(batch['pose'].clone().cpu(), theta=theta, axis=ax)
 
             if self.hparams.view_select and self.hparams.vs_sample_rate < 1:
-                warp_func = warp_tgt_to_ref_sparse
+                pix_idxs = results['pix_idxs']
             else:
-                warp_func = warp_tgt_to_ref
+                pix_ids = torch.arange(img_h*img_w)
 
-            warp_depth, out_pix_idxs = warp_func(results['depth'].cpu(), new_c2w, batch['pose'],
+            warp_depth, out_pix_idxs = warp_tgt_to_ref_sparse(results['depth'].cpu(), new_c2w, batch['pose'],
                                                  K,
-                                                 results['pix_idxs'], (img_h, img_w), device)
+                                                 pix_ids, (img_h, img_w), device)
             if not isdense:
                 warp_depth[out_pix_idxs == 0] = float('nan')
                 warp_depth[opacity == 0] = float('nan')
