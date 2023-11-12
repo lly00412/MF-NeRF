@@ -254,13 +254,28 @@ def warp_tgt_to_ref_sparse(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, 
            torch.where(proj_2d[:, 1] < width, 1, 0) * \
            torch.where(proj_2d[:, 1] >= 0, 1, 0)
 
+
     pixl_ids = proj_2d[:, 0] * width + proj_2d[:, 1]
     pixl_ids[mask == 0] = 0
     pixl_ids = pixl_ids.squeeze(-1)
 
-    mask = mask.reshape(-1,1).to(proj_depth)
-    warped_depth = proj_depth * mask  # (N_rays)
+    proj_depth, indices = torch.sort(proj_depth, 0)  # ascending oreder
+    sorted_pixl_ids = pixl_ids[indices]
+    proj_depth = proj_depth.flip(0)
+    sorted_pixl_ids = sorted_pixl_ids.flip(0)
+
+    warped_depth = torch.zeros(height * width).to(proj_depth)
+    warped_depth[sorted_pixl_ids] = proj_depth
+    warped_depth = warped_depth[pixl_ids]
+
+    del proj_depth,sorted_pixl_ids,indices
+
+    warped_depth[pixl_ids==0] = 0  # (N_rays)
     warped_depth = warped_depth.squeeze(-1)
+
+    # mask = mask.reshape(-1, 1).to(proj_depth)
+    # warped_depth = proj_depth * mask  # (N_rays)
+    # warped_depth = warped_depth.squeeze(-1)
 
     # proj_2d[:, 0] = torch.where(proj_2d[:, 0] >= height, height-1, proj_2d[:, 0])
     # proj_2d[:, 0] = torch.where(proj_2d[:, 0] < 0, 0, proj_2d[:, 0])
