@@ -100,6 +100,7 @@ class NeRFSystem(LightningModule):
         if self.hparams.start>0:
             self.vs_log = os.path.join(f"logs/{self.hparams.dataset_name}", self.hparams.exp_name, 'vs_log.txt')
         self.current_vs = 0
+        self.reweighted_samples = False
 
     def forward(self, batch, split, isvs=False):
         if split=='train':
@@ -179,6 +180,9 @@ class NeRFSystem(LightningModule):
         self.train_dataset.batch_size = self.hparams.batch_size
         self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
         self.test_dataset = dataset(split='test', **kwargs)
+
+        if self.train_dataset.ray_sampling_strategy == "weighted_images":
+            self.reweighted_samples = True
 
     def configure_optimizers(self):
         # define additional parameters
@@ -285,6 +289,7 @@ class NeRFSystem(LightningModule):
             self.no_save_test = self.hparams.no_save_test
             self.save_output = self.hparams.save_output
             self.run_vs = True
+            self.reweighted_samples = False
 
         self.val_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}'
         os.makedirs(self.val_dir, exist_ok=True)
@@ -449,6 +454,35 @@ class NeRFSystem(LightningModule):
                 u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
             imageio.imsave(os.path.join(self.vs_dir, f'{img_id:03d}_vsu.png'), u_img)
 
+        return u_score
+
+    def weight_train_samples(self, batch, batch_nb):
+        torch.cuda.empty_cache()
+        img_id = self.train_dataset.subs[batch_nb]
+        img_w, img_h = self.train_dataset.img_wh
+
+        batch['pose'] = batch['pose'].to(self.device)
+
+        if self.hparams.vs_sample_rate < 1:
+            total_rays = self.train_dataset.img_wh[0] * self.train_dataset.img_wh[1]
+            n_samples = int(self.hparams.vs_sample_rate * total_rays)
+            torch.random.manual_seed(self.hparams.vs_seed)
+            pix_idxs = torch.randperm(total_rays)[:n_samples]
+            results = self.render_by_rays(pix_idxs, batch, self.hparams.vs_batch_size)
+            results['pix_idxs'] = pix_idxs
+        else:
+            results = self(batch, split='test', isvs=True)
+            results['pix_idxs'] = None
+
+        if self.hparams.vs_by == 'warp':
+            K = self.train_dataset.K
+            sigmas, counts, u_score = self.warp_uncert(batch, results,
+                                                       img_h, img_w, K,
+                                                       isdense=not (self.hparams.vs_sample_rate < 1))
+        if self.hparams.vs_by in ['mcd_d', 'mcd_r']:
+            mcd_val = 'depth' if self.hparams.vs_by == 'mcd_d' else 'rgb'
+            sigmas, counts, u_score = self.mcd_uncert(batch, mcd_val, results['pix_idxs'],
+                                                      isdense=not (self.hparams.vs_sample_rate < 1))
         return u_score
 
     def validation_step(self, batch, batch_nb):
@@ -638,6 +672,7 @@ class NeRFSystem(LightningModule):
 
         if self.hparams.val_only:
             self.run_vs = True
+            self.reweighted_samples = False
 
         if self.run_vs:
             self.vs_dir = os.path.join(f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}/vs/',
@@ -705,6 +740,26 @@ class NeRFSystem(LightningModule):
                 f.close()
 
             self.hparams.view_select = False
+
+        if self.reweighted_samples:
+            print(f'Reweighted training samples...')
+            self.train_dataset.split='test'
+            sample_loader = DataLoader(self.train_dataset,
+                          num_workers=8,
+                          batch_size=None,
+                          pin_memory=True)
+            train_uncert_scores = []
+            pbar = tqdm(total=len(self.train_dataset.subs))
+            for batch_idx, batch in enumerate(sample_loader):
+                u_score = self.weight_train_samples(batch, batch_idx)
+                train_uncert_scores.append(u_score)
+                pbar.update(1)
+            pbar.close()
+            p = torch.cat([x.reshape(1) for x in train_uncert_scores])
+            p = p.cpu().numpy()
+            p /= p.sum()
+            self.train_dataset.p = p
+            self.train_dataset.split = 'train'
 
     def get_progress_bar_dict(self):
         # don't show the version number

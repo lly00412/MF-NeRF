@@ -32,7 +32,7 @@ def get_opts():
     parser.add_argument('--batch_size', type=int, default=8192,
                         help='number of rays in a batch')
     parser.add_argument('--ray_sampling_strategy', type=str, default='all_images',
-                        choices=['all_images', 'same_image','more_new_images'],
+                        choices=['all_images', 'same_image','weighted_images'],
                         help='''
                         all_images: uniformly from all pixels of ALL images
                         same_image: uniformly from all pixels of a SAME image
