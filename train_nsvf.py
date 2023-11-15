@@ -856,7 +856,7 @@ if __name__ == '__main__':
                                    default_hp_metric=False)
 
         trainer = Trainer(max_epochs=0 if hparams.val_only else hparams.num_epochs,
-                          check_val_every_n_epoch=10 if hparams.view_select else hparams.num_epochs,
+                          check_val_every_n_epoch=5 if hparams.view_select else hparams.num_epochs,
                           callbacks=callbacks,
                           logger=logger,
                           enable_model_summary=False,
