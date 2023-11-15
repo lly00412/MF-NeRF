@@ -160,13 +160,21 @@ class NeRFSystem(LightningModule):
                                        seed=self.hparams.vs_seed,
                                        **kwargs)
         self.handout_dataset.split='test'
-        cam_labels, cluster_centers = get_cams_cluster(self.handout_dataset.cam_centers,
-                                                        n_clusters=20,
-                                                        seed=self.hparams.vs_seed)
+        centriods = self.handout_dataset.cam_centers.astype(np.float32)
+        centriods = centriods.squeeze(-1)
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+        cv2.setRNGSeed(self.hparams.vs_seed)
+        flags = cv2.KMEANS_RANDOM_CENTERS
+        _, cam_labels, cluster_centers = cv2.kmeans(centriods, 20, None, criteria, 10, flags)
+        # cam_labels, cluster_centers = get_cams_cluster(self.handout_dataset.cam_centers,
+        #                                                 n_clusters=20,
+        #                                                 seed=self.hparams.vs_seed)
+        cam_labels = cam_labels.squeeze(-1)
         orders = np.zeros(len(cam_labels))
         for i in range(20):
             if cam_labels[cam_labels==i].size >0:
-                dist2centers = (self.handout_dataset.cam_centers[cam_labels==i] - cluster_centers[i])**2
+                dist2centers = (centriods[cam_labels==i] - cluster_centers[i])**2
+                dist2centers = dist2centers.sum(-1)
                 orders[cam_labels==i] = dist2centers.argsort()
         self.handout_dataset.cam_labels = cam_labels
         self.handout_dataset.cluster_centers = cluster_centers
@@ -176,9 +184,15 @@ class NeRFSystem(LightningModule):
             current_vs = 0
             while current_vs<self.hparams.N_vs:
                 np.random.seed(self.hparams.vs_seed)
-                choice = np.random.choice(len(self.handout_list), self.hparams.view_step, replace=False)
-                current_train_list = np.append(current_train_list, self.handout_list[choice])
-                self.handout_list = np.delete(self.handout_list, choice)
+                candidates = []
+                for i in range(20):
+                    cls_cams = np.where(self.handout_dataset.cam_labels==i)
+                    if cls_cams.size > 0:
+                        nearest_cam = self.handout_dataset.pop_orders[cls_cams].argmin()
+                        candidates.append(self.handout_list[cls_cams][nearest_cam])
+                choice = np.random.choice(len(candidates), self.hparams.view_step, replace=False)
+                current_train_list = np.append(current_train_list, candidates[choice])
+                self.handout_list = np.delete(np.arange(self.train_dataset.full), current_train_list)
                 current_vs += 1
 
             self.train_dataset = dataset(split=self.hparams.split,
@@ -221,20 +235,20 @@ class NeRFSystem(LightningModule):
             if n not in ['dR', 'dT']: net_params += [p]
 
         opts = []
-        # self.net_opt = FusedAdam(net_params, self.hparams.lr, eps=1e-15)
-        self.net_opt = torch.optim.Adam(net_params, self.hparams.lr, betas=(0.9, 0.999))
+        self.net_opt = FusedAdam(net_params, self.hparams.lr, eps=1e-15)
+        # self.net_opt = torch.optim.Adam(net_params, self.hparams.lr, betas=(0.9, 0.999))
         opts += [self.net_opt]
         if self.hparams.optimize_ext:
             opts += [FusedAdam([self.dR, self.dT], 1e-6)] # learning rate is hard-coded
-        # net_sch = CosineAnnealingLR(self.net_opt,
-        #                             self.hparams.num_epochs,
-        #                             self.hparams.lr*0.01)
+        net_sch = CosineAnnealingLR(self.net_opt,
+                                    self.hparams.num_epochs,
+                                    self.hparams.lr*0.01)
         #net_sch = torch.optim.lr_scheduler.StepLR(self.net_opt,2000,0.1)
-        net_sch = {
-            'scheduler': torch.optim.lr_scheduler.StepLR(self.net_opt,5000,0.1),
-            'interval': 'step',  # or 'epoch'
-            'frequency': 1
-        }
+        # net_sch = {
+        #     'scheduler': torch.optim.lr_scheduler.StepLR(self.net_opt,5000,0.1),
+        #     'interval': 'step',  # or 'epoch'
+        #     'frequency': 1
+        # }
 
         return opts, [net_sch]
 
@@ -700,21 +714,30 @@ class NeRFSystem(LightningModule):
             os.makedirs(self.vs_dir, exist_ok=True)
             print(f'Starting view selection Round {self.current_vs}!\n')
             vs_start = time.time()
+            candidates = []
+            current_train_list = self.train_dataset.subs
+            for i in range(20):
+                cams_idx = np.where(self.handout_dataset.cam_labels == i)
+                cls_cams = self.handout_dataset.cam_labels[cams_idx]
+                if len(cls_cams) > 0:
+                    nearest_cam = self.handout_dataset.pop_orders[cls_cams].argmin()
+                    candidates.append(self.handout_list[cls_cams][nearest_cam])
+            candidates = np.array(candidates)
             if self.hparams.vs_by == 'random':
                 np.random.seed(self.hparams.vs_seed)
-                choice = np.random.choice(len(self.handout_list), self.hparams.view_step, replace=False)
+                choice = np.random.choice(len(candidates), self.hparams.view_step, replace=False)
             else:
                 dataset = dataset_dict[self.hparams.dataset_name]
                 kwargs = {'root_dir': self.hparams.root_dir,
                           'downsample': self.hparams.downsample}
                 self.handout_dataset = dataset(split='train',
-                                               subs=self.handout_list,
+                                               subs=candidates,
                                                seed=self.hparams.vs_seed,
                                                **kwargs)
                 self.handout_dataset.split = 'test'
                 vs_loader = self.viewselect_loader()
                 view_uncert_scores = []
-                pbar = tqdm(total=len(self.handout_list))
+                pbar = tqdm(total=len(candidates))
                 for batch_idx, batch in enumerate(vs_loader):
                     vs_score = self.view_select_step(batch, batch_idx)
                     view_uncert_scores.append(vs_score)
@@ -725,9 +748,9 @@ class NeRFSystem(LightningModule):
                 topks = torch.topk(scores, self.hparams.view_step)
                 choice = topks.indices.numpy()
 
-            new_train_list = np.append(self.train_dataset.subs, self.handout_list[choice])
-            vs_choice = self.handout_list[choice]
-            self.handout_list = np.delete(self.handout_list, choice)
+            new_train_list = np.append(current_train_list, candidates[choice])
+            vs_choice = candidates[choice]
+            self.handout_list = np.delete(np.arange(self.train_dataset.full), new_train_list)
 
             dataset = dataset_dict[self.hparams.dataset_name]
             kwargs = {'root_dir': self.hparams.root_dir,
@@ -833,7 +856,7 @@ if __name__ == '__main__':
                                    default_hp_metric=False)
 
         trainer = Trainer(max_epochs=0 if hparams.val_only else hparams.num_epochs,
-                          check_val_every_n_epoch=5 if hparams.view_select else hparams.num_epochs,
+                          check_val_every_n_epoch=10 if hparams.view_select else hparams.num_epochs,
                           callbacks=callbacks,
                           logger=logger,
                           enable_model_summary=False,

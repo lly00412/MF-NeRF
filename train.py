@@ -211,20 +211,20 @@ class NeRFSystem(LightningModule):
             if n not in ['dR', 'dT']: net_params += [p]
 
         opts = []
-        # self.net_opt = FusedAdam(net_params, self.hparams.lr, eps=1e-15)
-        self.net_opt = torch.optim.Adam(net_params, self.hparams.lr, betas=(0.9, 0.999))
+        self.net_opt = FusedAdam(net_params, self.hparams.lr, eps=1e-15)
+        # self.net_opt = torch.optim.Adam(net_params, self.hparams.lr, betas=(0.9, 0.999))
         opts += [self.net_opt]
         if self.hparams.optimize_ext:
             opts += [FusedAdam([self.dR, self.dT], 1e-6)] # learning rate is hard-coded
-        # net_sch = CosineAnnealingLR(self.net_opt,
-        #                             self.hparams.num_epochs,
-        #                             self.hparams.lr*0.01)
+        net_sch = CosineAnnealingLR(self.net_opt,
+                                    self.hparams.num_epochs,
+                                    self.hparams.lr*0.01)
         #net_sch = torch.optim.lr_scheduler.StepLR(self.net_opt,2000,0.1)
-        net_sch = {
-            'scheduler': torch.optim.lr_scheduler.StepLR(self.net_opt,10000,0.1),
-            'interval': 'step',  # or 'epoch'
-            'frequency': 1
-        }
+        # net_sch = {
+        #     'scheduler': torch.optim.lr_scheduler.StepLR(self.net_opt,10000,0.1),
+        #     'interval': 'step',  # or 'epoch'
+        #     'frequency': 1
+        # }
 
         return opts, [net_sch]
 
