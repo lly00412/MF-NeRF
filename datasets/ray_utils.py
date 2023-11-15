@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from kornia import create_meshgrid
 from einops import rearrange
-
+from sklearn.cluster import KMeans
 
 @torch.cuda.amp.autocast(dtype=torch.float32)
 def get_ray_directions(H, W, K, device='cpu', random=False, return_uv=False, flatten=True):
@@ -235,6 +235,10 @@ def get_tf_cams(poses, target_radius=1.):
     scale = target_radius / radius
 
     return translate, scale
+
+def get_cams_cluster(cam_centers,n_clusters=20,seed=340):
+    kmeans = KMeans(n_clusters=n_clusters, random_state=seed, n_init="auto").fit(cam_centers)
+    return kmeans.labels_,kmeans.cluster_centers_
 
 def transform_pose(c2w, translate, scale):
     cam_center = c2w[:3, 3]

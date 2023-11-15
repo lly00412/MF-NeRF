@@ -117,4 +117,5 @@ class NSVFDataset(BaseDataset):
                 self.rays += [img]
 
             self.rays = torch.FloatTensor(np.stack(self.rays)) # (N_images, hw, ?)
+        self.cam_centers = np.array([pose[:3, 3:4] for pose in self.poses])
         self.poses = torch.FloatTensor(self.poses) # (N_images, 3, 4)
