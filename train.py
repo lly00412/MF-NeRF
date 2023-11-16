@@ -789,12 +789,17 @@ if __name__ == '__main__':
     if (not hparams.no_save_test) and \
        hparams.dataset_name=='nsvf' and \
        'Synthetic' in hparams.root_dir: # save video
-        imgs = sorted(glob.glob(os.path.join(system.val_dir, '*.png')))
+        imgs_rgb = sorted(glob.glob(os.path.join(system.val_dir, '*_pred.png')))
+        imgs_depth = sorted(glob.glob(os.path.join(system.val_dir, '*_d.png')))
+        imgs_err = sorted(glob.glob(os.path.join(system.val_dir, '*_e.png')))
         imageio.mimsave(os.path.join(system.val_dir, 'rgb.mp4'),
-                        [imageio.imread(img) for img in imgs[::2]],
+                        [imageio.imread(img) for img in imgs_rgb],
                         fps=30, macro_block_size=1)
         imageio.mimsave(os.path.join(system.val_dir, 'depth.mp4'),
-                        [imageio.imread(img) for img in imgs[1::2]],
+                        [imageio.imread(img) for img in imgs_depth],
+                        fps=30, macro_block_size=1)
+        imageio.mimsave(os.path.join(system.val_dir, 'err.mp4'),
+                        [imageio.imread(img) for img in imgs_err],
                         fps=30, macro_block_size=1)
 
     end = time.time()
