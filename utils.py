@@ -160,7 +160,7 @@ def warp_tgt_to_ref(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids=None, img_shape=Non
 
     warped_depth = torch.zeros(height*width).to(proj_depth)
     warped_depth[proj_2d] = proj_depth
-    # warped_depth = warped_depth.reshape(height, width)
+    warped_depth = warped_depth.reshape(height, width)
 
     del proj_depth
 
@@ -307,7 +307,7 @@ def percentile(t: torch.tensor, q):
     result = t.view(-1).kthvalue(k).values.item()
     return result
 
-def compute_roc(opt,est,intervals = 20): # input numpy array
+def compute_roc(opt,est,intervals = 10): # input numpy array
     ROC = []
     quants = [100. / intervals * t for t in range(1, intervals + 1)]
     thres = [np.percentile(est, q) for q in quants]
@@ -317,21 +317,21 @@ def compute_roc(opt,est,intervals = 20): # input numpy array
     AUC = np.trapz(ROC, dx=1. / intervals)
     return ROC,AUC
 
-def plot_roc(ROC_dict,fig_name, opt_label='rgb_err',intervals = 20):
+def plot_roc(ROC_dict,fig_name, opt_label='rgb_err',intervals = 10):
     quants = [100. / intervals * t for t in range(1, intervals + 1)]
     plt.figure()
-    plt.rcParams.update({'font.size': 20})
+    plt.rcParams.update({'font.size': 25})
     # plot opt
     ROC_opt = ROC_dict.pop(opt_label)
-    plt.plot(quants, ROC_opt, marker="^", markersize=8,  color='blue', label=opt_label)
+    plt.plot(quants, ROC_opt, marker="^", markersize=10, linewidth= 2,color='blue', label=opt_label)
     for est in ROC_dict.keys():
-        plt.plot(quants, ROC_dict[est], marker="o", markersize=8, label=est)
+        plt.plot(quants, ROC_dict[est], marker="o", markersize=10,linewidth= 2, label=est)
     plt.xticks(quants)
     plt.xlabel('Sample Size(%)')
     plt.ylabel('Accumulative MSE')
     plt.legend()
     fig = plt.gcf()
-    fig.set_size_inches(20, 8)
+    fig.set_size_inches(12, 8)
     fig.savefig(fig_name)
     plt.close()
 

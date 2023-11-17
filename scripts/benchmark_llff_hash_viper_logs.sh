@@ -8,12 +8,24 @@ scenes=(Lifestyle Toad Palace)
 
 python process_logs.py \
 --log_dir ${LOG_DIR} \
---scenes Lifestyle Toad Palace \
+--scenes Wineholder Robot Bike Spaceship Steamtrain Lifestyle Toad Palace \
 --N_vs 4 \
 --method random
+#
+python process_logs.py \
+--log_dir ${LOG_DIR} \
+--scenes Wineholder Robot Bike Spaceship Steamtrain Lifestyle Toad Palace \
+--N_vs 4 \
+--method reweighted/theta_3/warp
 
 python process_logs.py \
 --log_dir ${LOG_DIR} \
---scenes Lifestyle Toad Palace \
+--scenes Wineholder Robot Bike Spaceship Steamtrain Lifestyle Toad Palace \
 --N_vs 4 \
---method reweighted/theta_3/warp
+--method reweighted/mcd_d
+
+python process_logs.py \
+--log_dir ${LOG_DIR} \
+--scenes Wineholder Robot Bike Spaceship Steamtrain Lifestyle Toad Palace \
+--N_vs 4 \
+--method reweighted/mcd_r

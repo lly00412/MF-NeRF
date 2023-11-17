@@ -303,6 +303,9 @@ class NeRFSystem(LightningModule):
         if self.save_output:
             self.out_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}/output/'
             os.makedirs(self.out_dir, exist_ok=True)
+
+        if self.hparams.val_only:
+            self.no_save_test = self.hparams.no_save_test
     # def on_validation_epoch_start(self):
 
 
@@ -361,6 +364,12 @@ class NeRFSystem(LightningModule):
             warp_depth, out_pix_idxs = warp_tgt_to_ref_sparse(results['depth'].cpu(), new_c2w, batch['pose'],
                                                  K,
                                                  pix_idxs, (img_h, img_w), device)
+            vcam_depth, _ = warp_tgt_to_ref(results['depth'].cpu(), new_c2w, batch['pose'],K,pix_idxs, (img_h, img_w), device) # (h,w)
+
+            vcam_depth = depth2img(vcam_depth.cpu().numpy())
+            img_id = batch['img_idxs']
+            imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{theta}_{ax}_d.png'), vcam_depth)
+
             if not isdense:
                 warp_depth[out_pix_idxs == 0] = float('nan')
                 warp_depth[opacity == 0] = float('nan')
@@ -514,6 +523,8 @@ class NeRFSystem(LightningModule):
             u_dict = {}
             common_counts = 0
             img_w, img_h = self.test_dataset.img_wh
+            results['pix_idxs'] = None
+
             for u_method in self.hparams.u_by:
                 if u_method == 'warp':
                     K = self.test_dataset.K
@@ -536,13 +547,14 @@ class NeRFSystem(LightningModule):
                     u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
                     u_img[counts > 0] = sigmas
                     u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
-                    imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{self.hparams.u_by}.png'), u_img)
+                    imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{u_method}_u.png'), u_img)
 
             if self.hparams.plot_roc:
                 val_mask = (common_counts>=len(self.hparams.u_by))
                 rgb_pred = rearrange(results['rgb'].cpu(), '(h w) c -> h w c', h=h)
                 rgb_gt = rearrange(batch['rgb'].cpu(), '(h w) c -> h w c', h=h)
                 rgb_err = (rgb_pred-rgb_gt)**2
+                rgb_err = rgb_err.reshape(img_h*img_w,3)
                 val_err = rgb_err[val_mask]
                 rgb_err = val_err.mean(-1).flatten().numpy()
 
