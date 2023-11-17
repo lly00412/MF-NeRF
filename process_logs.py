@@ -35,7 +35,10 @@ if __name__ == '__main__':
             for eval in evals:
                 df = pd.DataFrame(acc.Scalars(f"test/{eval}"))
                 result_df.at[i,eval] = df['value'].iloc[-1]
-        file_path = os.path.join(args.log_dir,scene,args.method,'tensorboard_data.csv')
+        if not args.method == None:
+            file_path = os.path.join(args.log_dir,scene,args.method,'tensorboard_data.csv')
+        else:
+            file_path = os.path.join(args.log_dir, scene,'tensorboard_data.csv')
         print(f'Save to {file_path}')
         result_df.to_csv(file_path, index=False)
 
