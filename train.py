@@ -56,10 +56,22 @@ def err2img(err,flip=False):
                                   cv2.COLORMAP_JET)
     return err_img
 
+def u2img(err,flip=False):
+    err = (err / np.quantile(err, 0.9))*0.8
+    err_img = cv2.applyColorMap((err*255).astype(np.uint8),
+                                  cv2.COLORMAP_HOT)
+    err_img = cv2.cvtColor(err_img,cv2.COLOR_BGR2RGB)
+    return err_img
+
 def depth2img(depth):
     depth = (depth-depth.min())/(depth.max()-depth.min())
     depth_img = cv2.applyColorMap((depth*255).astype(np.uint8),
                                   cv2.COLORMAP_TURBO)
+    return depth_img
+
+def depth2img_gray(depth):
+    depth = (depth-depth.min())/(depth.max()-depth.min())
+    depth_img = (depth*255).astype(np.uint8)
     return depth_img
 
 class NeRFSystem(LightningModule):
@@ -349,26 +361,24 @@ class NeRFSystem(LightningModule):
                  'img_w': img_w}
 
         Vcam = GetVirtualCam(vargs)
-        thetas = [self.hparams.theta, -self.hparams.theta,self.hparams.theta , -self.hparams.theta]
+        thetas = [self.hparams.theta, -self.hparams.theta, self.hparams.theta, -self.hparams.theta]
         rot_ax = ['x', 'x', 'y', 'y']
         warp_depths = [vargs['ref_depth_map'].cpu()]
         counts = 0
         for theta, ax in zip(thetas, rot_ax):
             new_c2w = Vcam.get_near_c2w(batch['pose'].clone().cpu(), theta=theta, axis=ax)
+            v_results = self.render_virtual_cam(new_c2w, batch)
+            v_depth = v_results['depth'].cpu()
 
             if self.hparams.view_select and self.hparams.vs_sample_rate < 1:
                 pix_idxs = results['pix_idxs']
             else:
-                pix_idxs = torch.arange(img_h*img_w)
+                pix_idxs = torch.arange(img_h * img_w)
 
-            warp_depth, out_pix_idxs = warp_tgt_to_ref_sparse(results['depth'].cpu(), new_c2w, batch['pose'],
-                                                 K,
-                                                 pix_idxs, (img_h, img_w), device)
-            vcam_depth, _ = warp_tgt_to_ref(results['depth'].cpu(), new_c2w, batch['pose'],K,pix_idxs, (img_h, img_w), device) # (h,w)
-
-            vcam_depth = depth2img(vcam_depth.cpu().numpy())
-            img_id = batch['img_idxs']
-            imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{theta}_{ax}_d.png'), vcam_depth)
+            _, out_pix_idxs = warp_tgt_to_ref_sparse(results['depth'].cpu(), new_c2w, batch['pose'],
+                                                     K,
+                                                     pix_idxs, (img_h, img_w), device)
+            warp_depth = v_depth[out_pix_idxs.cpu()]
 
             if not isdense:
                 warp_depth[out_pix_idxs == 0] = float('nan')
@@ -443,7 +453,7 @@ class NeRFSystem(LightningModule):
         if self.hparams.vs_by == 'warp':
             K = self.handout_dataset.K
             sigmas, counts, u_score = self.warp_uncert(batch, results,
-                                                       img_h, img_w, K,
+                                                       img_h, img_w, K,self.hparams.theta,
                                                         isdense=not (self.hparams.vs_sample_rate<1))
         if self.hparams.vs_by in ['mcd_d', 'mcd_r']:
             mcd_val = 'depth' if self.hparams.vs_by=='mcd_d' else 'rgb'
@@ -521,16 +531,39 @@ class NeRFSystem(LightningModule):
             ROC_dict = {}
             AUC_dict = {}
             u_dict = {}
+            counts_dict = {}
             common_counts = 0
             img_w, img_h = self.test_dataset.img_wh
             results['pix_idxs'] = None
 
+            thetas = [1, 3, 5, 7]
+
             for u_method in self.hparams.u_by:
                 if u_method == 'warp':
                     K = self.test_dataset.K
+                    # for theta in thetas:
+                    #     sigmas, counts, u_score = self.warp_uncert(batch, results,
+                    #                                            img_h, img_w, K, theta,
+                    #                                            isdense=True)
                     sigmas, counts, u_score = self.warp_uncert(batch, results,
                                                                img_h, img_w, K,
                                                                isdense=True)
+                        # count_px = (counts > 0).sum()
+                        # count_pct = count_px / (img_h * img_w)
+                        # logs[theta] = u_score
+                        # counts_dict[theta] = counts
+                        # common_counts += counts
+                        # u_dict[theta] = sigmas
+                        #
+                        # u_max = torch.max(sigmas[counts > 0].flatten())
+                        # u_median = torch.median(sigmas[counts > 0].flatten())
+                        #
+                        # logs[f'theta{theta}/u_mean'] = u_score
+                        # logs[f'theta{theta}/u_max'] = u_max
+                        # logs[f'theta{theta}/u_median'] = u_median
+                        # logs[f'theta{theta}/count'] = count_pct
+
+
                 if u_method in ['mcd_d', 'mcd_r']:
                     mcd_val = 'depth' if u_method == 'mcd_d' else 'rgb'
                     sigmas, counts, u_score = self.mcd_uncert(batch, mcd_val, pix_idxs=None,
@@ -541,13 +574,23 @@ class NeRFSystem(LightningModule):
                 u_dict[u_method] = sigmas
 
                 if not self.no_save_test:
-                    sigmas = err2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
+                    sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
                     sigmas = sigmas.squeeze(1)
                     counts = counts.cpu().numpy()
                     u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
                     u_img[counts > 0] = sigmas
                     u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
                     imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{u_method}_u.png'), u_img)
+                    # for theta in thetas:
+                    #     sigmas = u_dict[theta]
+                    #     counts = counts_dict[theta]
+                    #     sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
+                    #     sigmas = sigmas.squeeze(1)
+                    #     counts = counts.cpu().numpy()
+                    #     u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
+                    #     u_img[counts > 0] = sigmas
+                    #     u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
+                    #     imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{u_method}_{theta}_u.png'), u_img)
 
             if self.hparams.plot_roc:
                 val_mask = (common_counts>=len(self.hparams.u_by))
@@ -555,19 +598,38 @@ class NeRFSystem(LightningModule):
                 rgb_gt = rearrange(batch['rgb'].cpu(), '(h w) c -> h w c', h=h)
                 rgb_err = (rgb_pred-rgb_gt)**2
                 rgb_err = rgb_err.reshape(img_h*img_w,3)
+
+                val_mask = (common_counts >= len(thetas))
                 val_err = rgb_err[val_mask]
                 rgb_err = val_err.mean(-1).flatten().numpy()
-
                 ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(rgb_err, rgb_err)
 
+                # for theta in thetas:
+                #     rgb_pred = rearrange(results['rgb'].cpu(), '(h w) c -> h w c', h=h)
+                #     rgb_gt = rearrange(batch['rgb'].cpu(), '(h w) c -> h w c', h=h)
+                #     rgb_err = (rgb_pred - rgb_gt) ** 2
+                #     rgb_err = rgb_err.reshape(img_h * img_w, 3)
+                #     val_mask = (counts_dict[theta] > 0)
+                #     val_err = rgb_err[val_mask]
+                #     rgb_err = val_err.mean(-1).flatten().numpy()
+                #
+                #     ROC_dict[f'{theta}/rgb_err'], AUC_dict[f'{theta}/rgb_err'] = compute_roc(rgb_err, rgb_err)
+                #     sigmas = u_dict[theta][val_mask].numpy()
+                #     ROC_dict[theta], AUC_dict[theta] = compute_roc(rgb_err, sigmas)
                 for u_method in self.hparams.u_by:
                     sigmas = u_dict[u_method][val_mask].numpy()
                     ROC_dict[u_method], AUC_dict[u_method] = compute_roc(rgb_err, sigmas)
+
+                # for theta in thetas:
+                #     sigmas = u_dict[theta][val_mask].numpy()
+                #     ROC_dict[theta], AUC_dict[theta] = compute_roc(rgb_err, sigmas)
 
             logs['ROC'] = ROC_dict.copy()
             logs['AUC'] = AUC_dict.copy()
 
             fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
+            # fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc_thetas.png')
+
             plot_roc(ROC_dict, fig_name, opt_label='rgb_err')
 
             auc_log = os.path.join(self.val_dir, f'{img_id:03d}_auc.txt')
@@ -598,9 +660,9 @@ class NeRFSystem(LightningModule):
             depth = rearrange(results['depth'].cpu().numpy(), '(h w) -> h w', h=h)
             outputs['data']['depth'] = depth
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_pred.png'), rgb_pred)
-            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_d.png'), depth2img(depth))
+            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_d.png'), depth2img_gray(depth))
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_gt.png'), rgb_gt)
-            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), err2img(err.mean(-1)))
+            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), u2img(err.mean(-1)))
 
             ########### save outputs ##################
             if self.save_output:
@@ -628,6 +690,27 @@ class NeRFSystem(LightningModule):
             mean_lpips = all_gather_ddp_if_available(lpipss).mean()
             self.log('test/lpips_vgg', mean_lpips)
 
+        # thetas = [1, 3, 5, 7]
+        # vsb_dict = {}
+        # for theta in thetas:
+        #     u_means =  torch.stack([x[f'theta{theta}/u_mean'] for x in outputs])
+        #     u_maxs = torch.stack([x[f'theta{theta}/u_max'] for x in outputs])
+        #     u_medians = torch.stack([x[f'theta{theta}/u_median'] for x in outputs])
+        #     count_pcts = torch.stack([x[f'theta{theta}/count'] for x in outputs])
+        #
+        #     mean_u_mean = all_gather_ddp_if_available(u_means).mean()
+        #     mean_u_max = all_gather_ddp_if_available(u_maxs).mean()
+        #     mean_u_median = all_gather_ddp_if_available(u_medians).mean()
+        #     mean_count = all_gather_ddp_if_available(count_pcts).mean()
+        #     vsb_dict[theta] = mean_count
+        #
+        #     print(f'theta = {theta}')
+        #     print(f'uncert mean:{mean_u_mean:.4f}')
+        #     print(f'uncert max:{mean_u_max:.4f}')
+        #     print(f'uncert median:{mean_u_median:.4f}')
+        #     print(f'count pct: {mean_count * 100:.2f}')
+
+
         if self.hparams.plot_roc:
             ROCs = {}
             AUCs = {}
@@ -637,6 +720,13 @@ class NeRFSystem(LightningModule):
             for u_method in self.hparams.u_by:
                 ROCs[u_method] = np.stack([x['ROC'][u_method] for x in outputs]).mean(0)
                 AUCs[u_method] = np.array([x['AUC'][u_method] for x in outputs]).mean(0)
+            # for theta in thetas:
+            #     ROCs[theta] = np.stack([x['ROC'][theta] for x in outputs]).mean(0)
+            #     AUCs[theta] = np.array([x['AUC'][theta] for x in outputs]).mean(0)
+            #     ROCs[f'{theta}/rgb_err'] = np.stack([x['ROC'][f'{theta}/rgb_err'] for x in outputs]).mean(0)
+            #     AUCs[f'{theta}/rgb_err'] = np.array([x['AUC'][f'{theta}/rgb_err'] for x in outputs]).mean(0)
+            #     AUCs[f'{theta}/counts'] = vsb_dict[theta]
+
 
             fig_name = os.path.join(self.val_dir, f'scene_avg_roc.png')
             plot_roc(ROCs, fig_name, opt_label='rgb_err')

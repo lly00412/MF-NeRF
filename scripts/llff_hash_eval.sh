@@ -5,7 +5,8 @@ export BASE_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/nerf_llff/Hash/res0.25/few
 export CKPT_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/nerf_llff/Hash/fewshot15_v1/
 export CUDA_VISIBLE_DEVICES=0
 
-scenes=(horns trex fortress room)
+#scenes=(horns trex fortress room)
+scenes=(horns fortress room trex)
 
 ######baseline
 for SCENES in ${scenes[@]}
