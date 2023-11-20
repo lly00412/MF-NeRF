@@ -79,6 +79,8 @@ def get_opts():
                         help='whether to save vs uncertainty map')
     parser.add_argument("--train_img", type=int, default=None, nargs='+',
                         help='only use training imgs listed here')
+    parser.add_argument('--n_centers', type=int, default=10,
+                        help='num of initial centers for nsvf training kmeans')
 
     # loss options
     parser.add_argument('--loss', type=str, default='l2',

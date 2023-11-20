@@ -165,13 +165,13 @@ class NeRFSystem(LightningModule):
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
         cv2.setRNGSeed(self.hparams.vs_seed)
         flags = cv2.KMEANS_RANDOM_CENTERS
-        _, cam_labels, cluster_centers = cv2.kmeans(centriods, 20, None, criteria, 10, flags)
+        _, cam_labels, cluster_centers = cv2.kmeans(centriods, self.hparams.n_centers, None, criteria, 10, flags)
         # cam_labels, cluster_centers = get_cams_cluster(self.handout_dataset.cam_centers,
         #                                                 n_clusters=20,
         #                                                 seed=self.hparams.vs_seed)
         cam_labels = cam_labels.squeeze(-1)
         orders = np.zeros(len(cam_labels))
-        for i in range(20):
+        for i in range(self.hparams.n_centers):
             if cam_labels[cam_labels==i].size >0:
                 dist2centers = (centriods[cam_labels==i] - cluster_centers[i])**2
                 dist2centers = dist2centers.sum(-1)
@@ -185,7 +185,7 @@ class NeRFSystem(LightningModule):
             while current_vs<self.hparams.N_vs:
                 np.random.seed(self.hparams.vs_seed)
                 candidates = []
-                for i in range(20):
+                for i in range(self.hparams.n_centers):
                     cls_cams = np.where(self.handout_dataset.cam_labels==i)
                     if cls_cams.size > 0:
                         nearest_cam = self.handout_dataset.pop_orders[cls_cams].argmin()
@@ -720,7 +720,7 @@ class NeRFSystem(LightningModule):
             vs_start = time.time()
             candidates = []
             current_train_list = self.train_dataset.subs
-            for i in range(20):
+            for i in range(self.hparams.n_centers):
                 cams_idx = np.where(self.handout_dataset.cam_labels == i)
                 cls_cams = self.handout_dataset.cam_labels[cams_idx]
                 if len(cls_cams) > 0:
