@@ -47,7 +47,7 @@ if __name__ == '__main__':
     labels = ['22', '24', '26', '28']
     evals = ['train/runtime(mins)', 'vs/runtime(mins)']
     result_df = pd.DataFrame()
-    for i in range(args.N_vs):
+    for i in range(1,args.N_vs):
         for eval in evals:
             acc_values = 0
             for scene in args.scenes:
