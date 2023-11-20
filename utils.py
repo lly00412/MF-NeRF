@@ -317,15 +317,26 @@ def compute_roc(opt,est,intervals = 10): # input numpy array
     AUC = np.trapz(ROC, dx=1. / intervals)
     return ROC,AUC
 
+method_dict={
+   'warp' : 'VS-NeRF',
+    'mcd_d': 'MCD-Depth',
+    'mcd_r':'MCD-RGB',
+    'rgb_err': 'RGB_Error'
+}
+
 def plot_roc(ROC_dict,fig_name, opt_label='rgb_err',intervals = 10):
     quants = [100. / intervals * t for t in range(1, intervals + 1)]
     plt.figure()
     plt.rcParams.update({'font.size': 25})
     # plot opt
     ROC_opt = ROC_dict.pop(opt_label)
-    plt.plot(quants, ROC_opt, marker="^", markersize=10, linewidth= 2,color='blue', label=opt_label)
+    plt.plot(quants, ROC_opt, marker="^", markersize=10, linewidth= 2,color='blue', label=method_dict[opt_label])
     for est in ROC_dict.keys():
-        plt.plot(quants, ROC_dict[est], marker="o", markersize=10,linewidth= 2, label=est)
+        if est in method_dict.keys():
+            est_name = method_dict[est]
+        else:
+            est_name = f'theta = {est}'
+        plt.plot(quants, ROC_dict[est], marker="o", markersize=10,linewidth= 2, label=est_name)
     plt.xticks(quants)
     plt.xlabel('Sample Size(%)')
     plt.ylabel('Accumulative MSE')
