@@ -73,13 +73,13 @@ def get_opts():
     parser.add_argument('--vs_batch_size', type=int, default=1024,
                         help='number of rays processing a batch for view selection')
     parser.add_argument('--vs_by', type=str, default=None,
-                        choices=[None, 'random', 'warp', 'mcd_d', 'mcd_r'],
+                        choices=[None, 'random', 'warp', 'mcd_d', 'mcd_r', 'entropy'],
                         help='select supplemental views by random / warping uncertainty / mcdropout depth / mcdropout rgb')
     parser.add_argument('--no_save_vs', action='store_true', default=False,
                         help='whether to save vs uncertainty map')
     parser.add_argument("--train_img", type=int, default=None, nargs='+',
                         help='only use training imgs listed here')
-    parser.add_argument('--n_centers', type=int, default=10,
+    parser.add_argument('--n_centers', type=int, default=0,
                         help='num of initial centers for nsvf training kmeans')
 
     # loss options
@@ -91,8 +91,8 @@ def get_opts():
     parser.add_argument('--eval_u', action='store_true', default=False,
                         help='whether to compute uncertainty')
     parser.add_argument('--u_by', type=str, default=None, nargs='+',
-                        choices=[None, 'warp', 'mcd_d', 'mcd_r'],
-                        help='estimate uncertainty by warping / mcdropout depth / mcdropout rgb')
+                        choices=[None, 'warp', 'mcd_d', 'mcd_r','entropy'],
+                        help='estimate uncertainty by warping / mcdropout depth / mcdropout rgb/ entropy')
     parser.add_argument('--plot_roc', action='store_true', default=False,
                         help='whether to plot roc of all estimation')
 

@@ -62,6 +62,18 @@ def depth2img(depth):
                                   cv2.COLORMAP_TURBO)
     return depth_img
 
+def u2img(err,flip=False):
+    err = (err / np.quantile(err, 0.9))*0.8
+    err_img = cv2.applyColorMap((err*255).astype(np.uint8),
+                                  cv2.COLORMAP_HOT)
+    err_img = cv2.cvtColor(err_img,cv2.COLOR_BGR2RGB)
+    return err_img
+
+def depth2img_gray(depth):
+    depth = (depth-depth.min())/(depth.max()-depth.min())
+    depth_img = (depth*255).astype(np.uint8)
+    return depth_img
+
 class NeRFSystem(LightningModule):
     def __init__(self, hparams):
         super().__init__()
@@ -129,6 +141,10 @@ class NeRFSystem(LightningModule):
             kwargs['exposure'] = batch['exposure']
         if isvs:
             kwargs['to_cpu'] = True
+        if self.hparams.vs_by == 'entropy' or 'entropy' in self.hparams.u_by:
+            kwargs['entropy'] = True
+        if self.hparams.vs_sample_rate<1:
+            kwargs['sparse'] = True
 
         return render(self.model, rays_o, rays_d, **kwargs)
 
@@ -160,29 +176,32 @@ class NeRFSystem(LightningModule):
                                        seed=self.hparams.vs_seed,
                                        **kwargs)
         self.handout_dataset.split='test'
-        centriods = self.handout_dataset.cam_centers.astype(np.float32)
-        centriods = centriods.squeeze(-1)
-        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-        cv2.setRNGSeed(self.hparams.vs_seed)
-        flags = cv2.KMEANS_RANDOM_CENTERS
-        _, cam_labels, cluster_centers = cv2.kmeans(centriods, self.hparams.n_centers, None, criteria, 10, flags)
-        # cam_labels, cluster_centers = get_cams_cluster(self.handout_dataset.cam_centers,
-        #                                                 n_clusters=20,
-        #                                                 seed=self.hparams.vs_seed)
-        cam_labels = cam_labels.squeeze(-1)
-        orders = np.zeros(len(cam_labels))
-        for i in range(self.hparams.n_centers):
-            if cam_labels[cam_labels==i].size >0:
-                dist2centers = (centriods[cam_labels==i] - cluster_centers[i])**2
-                dist2centers = dist2centers.sum(-1)
-                orders[cam_labels==i] = dist2centers.argsort()
+        if self.hparams.n_centers>0:
+            centriods = self.handout_dataset.cam_centers.astype(np.float32)
+            centriods = centriods.squeeze(-1)
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+            cv2.setRNGSeed(self.hparams.vs_seed)
+            flags = cv2.KMEANS_RANDOM_CENTERS
+            _, cam_labels, cluster_centers = cv2.kmeans(centriods, self.hparams.n_centers, None, criteria, 10, flags)
+            # cam_labels, cluster_centers = get_cams_cluster(self.handout_dataset.cam_centers,
+            #                                                 n_clusters=20,
+            #                                                 seed=self.hparams.vs_seed)
+            self.handout_dataset.cluster_centers = cluster_centers
+            cam_labels = cam_labels.squeeze(-1)
+            orders = np.zeros(len(cam_labels))
+            for i in range(self.hparams.n_centers):
+                if cam_labels[cam_labels==i].size >0:
+                    dist2centers = (centriods[cam_labels==i] - cluster_centers[i])**2
+                    dist2centers = dist2centers.sum(-1)
+                    orders[cam_labels==i] = dist2centers.argsort()
+        else:
+            cam_labels = np.arange(len(self.handout_dataset.subs))
+            orders = np.zeros(len(self.handout_dataset.subs))
+            self.hparams.n_centers = len(self.handout_dataset.subs)
         self.handout_dataset.cam_labels = cam_labels
-        self.handout_dataset.cluster_centers = cluster_centers
         self.handout_dataset.pop_orders = orders.astype(np.int32)
-        print(cam_labels)
-        print(orders)
-
-
+        # print(cam_labels)
+        # print(orders)
 
         if self.hparams.view_select and self.hparams.vs_by==None:
             current_vs = 0
@@ -356,13 +375,24 @@ class NeRFSystem(LightningModule):
             sub_results = self(sub_batch, split='test',isvs=True)
             all_results += [sub_results]
         results = {}
-        for k in ['rgb','depth']:
+        output_list = ['rgb','depth','opacity']
+        if self.hparams.vs_by == 'entropy' or 'entropy' in self.hparams.u_by:
+            output_list += ['entropy']
+
+        for k in output_list:
             if all_results[0][k].dim() == 0:
                 results[k] = torch.cat([r[k].clone().reshape(1) for r in all_results])
             else:
                 results[k] = torch.cat([r[k].clone() for r in all_results])
         del all_results
         return results
+
+    def entropy_uncert(self, results):
+        opacity = results['opacity'].cpu()
+        entropys = results['entropy'].cpu()  # (n_rays)
+        counts = (opacity > 0)
+        entropy_score = torch.mean(entropys[counts].flatten())
+        return entropys.cpu(), counts.cpu(), entropy_score.cpu()
 
     def warp_uncert(self, batch, results, img_h, img_w, K, isdense=True):
         opacity = results['opacity'].cpu()  # (n_rays)
@@ -457,7 +487,7 @@ class NeRFSystem(LightningModule):
         batch['pose'] = batch['pose'].to(self.device)
 
         if self.hparams.vs_sample_rate < 1:
-            total_rays = self.handout_dataset.img_wh[0] * self.handou_dataset.img_wh[1]
+            total_rays = self.handout_dataset.img_wh[0] * self.handout_dataset.img_wh[1]
             n_samples = int(self.hparams.vs_sample_rate * total_rays)
             torch.random.manual_seed(self.hparams.vs_seed)
             pix_idxs = torch.randperm(total_rays)[:n_samples]
@@ -476,7 +506,9 @@ class NeRFSystem(LightningModule):
             mcd_val = 'depth' if self.hparams.vs_by=='mcd_d' else 'rgb'
             sigmas, counts, u_score = self.mcd_uncert(batch,mcd_val,results['pix_idxs'],
                                                       isdense=not (self.hparams.vs_sample_rate<1))
-
+        if self.hparams.vs_by == 'entropy':
+            sigmas, counts, u_score = self.entropy_uncert(results)
+            counts = counts.to(torch.float)
         # opacity = results['opacity'].cpu()
         # print(f'img {img_id} uncert score:{u_score}')
         # print(f'Total resolution: {img_h * img_w}')
@@ -484,7 +516,7 @@ class NeRFSystem(LightningModule):
         # print(f'valid pxs: {(opacity > 0).sum()}')
 
         if not self.hparams.no_save_vs:
-            sigmas = err2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
+            sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
             sigmas = sigmas.squeeze(1)
             counts = counts.cpu().numpy()
             u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
@@ -496,6 +528,7 @@ class NeRFSystem(LightningModule):
                 u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
             imageio.imsave(os.path.join(self.vs_dir, f'{img_id:03d}_vsu.png'), u_img)
 
+        print(u_score)
         return u_score
 
     def weight_train_samples(self, batch, batch_nb):
@@ -518,12 +551,15 @@ class NeRFSystem(LightningModule):
 
         if self.hparams.vs_by == 'warp':
             K = self.train_dataset.K
-            sigmas, counts, u_score = self.warp_uncert(batch, results,
+            _, _, u_score = self.warp_uncert(batch, results,
                                                        img_h, img_w, K,
                                                        isdense=not (self.hparams.vs_sample_rate < 1))
+        if self.hparams.vs_by == 'entropy':
+            _, _, u_score = self.entropy_uncert(results)
+
         if self.hparams.vs_by in ['mcd_d', 'mcd_r']:
             mcd_val = 'depth' if self.hparams.vs_by == 'mcd_d' else 'rgb'
-            sigmas, counts, u_score = self.mcd_uncert(batch, mcd_val, results['pix_idxs'],
+            _, _, u_score = self.mcd_uncert(batch, mcd_val, results['pix_idxs'],
                                                       isdense=not (self.hparams.vs_sample_rate < 1))
         return u_score
 
@@ -589,6 +625,9 @@ class NeRFSystem(LightningModule):
                     mcd_val = 'depth' if u_method == 'mcd_d' else 'rgb'
                     sigmas, counts, u_score = self.mcd_uncert(batch, mcd_val, pix_idxs=None,
                                                               isdense=True)
+                if u_method == 'entropy':
+                    sigmas, counts, u_score = self.entropy_uncert(results)
+                    counts = counts.to(torch.float)
 
                 logs[u_method] = u_score
                 common_counts += counts
@@ -727,11 +766,11 @@ class NeRFSystem(LightningModule):
             for i in range(self.hparams.n_centers):
                 cams_idx = (self.handout_dataset.cam_labels == i)
                 cls_cams = self.handout_dataset.subs[cams_idx]
-                print(cls_cams)
+                # print(cls_cams)
                 if len(cls_cams) > 0:
                     nearest_cam = self.handout_dataset.pop_orders[cams_idx].argmin()
-                    print(self.handout_dataset.pop_orders[cams_idx])
-                    print(nearest_cam)
+                    # print(self.handout_dataset.pop_orders[cams_idx])
+                    # print(nearest_cam)
                     candidates.append(cls_cams[nearest_cam])
             candidates = np.array(candidates)
             print(candidates)

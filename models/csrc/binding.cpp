@@ -125,6 +125,26 @@ std::vector<torch::Tensor> composite_train_fw(
                 rays_a, opacity_threshold);
 }
 
+std::vector<torch::Tensor> composite_with_entropy_fw(
+    const torch::Tensor sigmas,
+    const torch::Tensor rgbs,
+    const torch::Tensor deltas,
+    const torch::Tensor ts,
+    const torch::Tensor rays_a,
+    const float opacity_threshold
+){
+    CHECK_INPUT(sigmas);
+    CHECK_INPUT(rgbs);
+    CHECK_INPUT(deltas);
+    CHECK_INPUT(ts);
+    CHECK_INPUT(rays_a);
+
+    return composite_train_fw_cu(
+                sigmas, rgbs, deltas, ts,
+                rays_a, opacity_threshold);
+}
+
+
 std::vector<torch::Tensor> composite_train_transient_fw(
     const torch::Tensor static_sigmas,
     const torch::Tensor static_rgbs,
@@ -275,6 +295,40 @@ void composite_test_fw(
         opacity, depth, rgb);
 }
 
+void composite_test_with_entropy_fw(
+    const torch::Tensor sigmas,
+    const torch::Tensor rgbs,
+    const torch::Tensor deltas,
+    const torch::Tensor ts,
+    const torch::Tensor hits_t,
+    const torch::Tensor alive_indices,
+    const float T_threshold,
+    const torch::Tensor N_eff_samples,
+    torch::Tensor opacity,
+    torch::Tensor depth,
+    torch::Tensor entropy,
+    torch::Tensor rgb
+){
+    CHECK_INPUT(sigmas);
+    CHECK_INPUT(rgbs);
+    CHECK_INPUT(deltas);
+    CHECK_INPUT(ts);
+    CHECK_INPUT(hits_t);
+    CHECK_INPUT(alive_indices);
+    CHECK_INPUT(N_eff_samples);
+    CHECK_INPUT(opacity);
+    CHECK_INPUT(depth);
+    CHECK_INPUT(entropy);
+    CHECK_INPUT(rgb);
+
+    composite_test_with_entropy_fw_cu(
+        sigmas, rgbs, deltas, ts, hits_t, alive_indices,
+        T_threshold, N_eff_samples,
+        opacity, depth, entropy, rgb);
+}
+
+
+
 void composite_test_transient_fw(
     const torch::Tensor static_sigmas,
     const torch::Tensor static_rgbs,
@@ -369,11 +423,13 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m){
     m.def("composite_train_fw", &composite_train_fw);
     m.def("composite_train_bw", &composite_train_bw);
 
+    m.def("composite_train_with_entropy_fw", &composite_train_with_entropy_fw);
     m.def("composite_train_transient_fw", &composite_train_transient_fw);
     m.def("composite_train_transient_bw", &composite_train_transient_bw);
 
     m.def("composite_test_fw", &composite_test_fw);
     m.def("composite_test_transient_fw", &composite_test_transient_fw);
+    m.def("composite_test_with_entropy_fw", &composite_test_with_entropy_fw);
 
     m.def("distortion_loss_fw", &distortion_loss_fw);
     m.def("distortion_loss_bw", &distortion_loss_bw);
