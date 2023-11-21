@@ -179,6 +179,10 @@ class NeRFSystem(LightningModule):
         self.handout_dataset.cam_labels = cam_labels
         self.handout_dataset.cluster_centers = cluster_centers
         self.handout_dataset.pop_orders = orders.astype(np.int32)
+        print(cam_labels)
+        print(orders)
+
+
 
         if self.hparams.view_select and self.hparams.vs_by==None:
             current_vs = 0
@@ -374,7 +378,7 @@ class NeRFSystem(LightningModule):
                  'img_w': img_w}
 
         Vcam = GetVirtualCam(vargs)
-        thetas = [self.hparams.theta, -self.hparams.theta,self.hparams.theta , -self.hparams.theta]
+        thetas = [self.hparams.theta, -self.hparams.theta, self.hparams.theta, -self.hparams.theta]
         rot_ax = ['x', 'x', 'y', 'y']
         warp_depths = [vargs['ref_depth_map'].cpu()]
         counts = 0
@@ -389,9 +393,9 @@ class NeRFSystem(LightningModule):
                 pix_idxs = torch.arange(img_h * img_w)
 
             _, out_pix_idxs = warp_tgt_to_ref_sparse(results['depth'].cpu(), new_c2w, batch['pose'],
-                                                 K,
-                                                 pix_idxs, (img_h, img_w), device)
-            warp_depth = v_depth[out_pix_idxs]
+                                                     K,
+                                                     pix_idxs, (img_h, img_w), device)
+            warp_depth = v_depth[out_pix_idxs.cpu()]
 
             if not isdense:
                 warp_depth[out_pix_idxs == 0] = float('nan')
@@ -721,12 +725,16 @@ class NeRFSystem(LightningModule):
             candidates = []
             current_train_list = self.train_dataset.subs
             for i in range(self.hparams.n_centers):
-                cams_idx = np.where(self.handout_dataset.cam_labels == i)
-                cls_cams = self.handout_dataset.cam_labels[cams_idx]
+                cams_idx = (self.handout_dataset.cam_labels == i)
+                cls_cams = self.handout_dataset.subs[cams_idx]
+                print(cls_cams)
                 if len(cls_cams) > 0:
-                    nearest_cam = self.handout_dataset.pop_orders[cls_cams].argmin()
-                    candidates.append(self.handout_list[cls_cams][nearest_cam])
+                    nearest_cam = self.handout_dataset.pop_orders[cams_idx].argmin()
+                    print(self.handout_dataset.pop_orders[cams_idx])
+                    print(nearest_cam)
+                    candidates.append(cls_cams[nearest_cam])
             candidates = np.array(candidates)
+            print(candidates)
             if self.hparams.vs_by == 'random':
                 np.random.seed(self.hparams.vs_seed)
                 choice = np.random.choice(len(candidates), self.hparams.view_step, replace=False)

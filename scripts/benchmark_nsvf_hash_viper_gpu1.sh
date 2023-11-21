@@ -7,6 +7,7 @@ export CKPT_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/nsvf/Synthetic_NSVF/Hash/fewshot1
 export CUDA_VISIBLE_DEVICES=1
 export PREFIX=Synthetic_NSVF/Hash/fewshot15_v1
 
+
 scenes=(Robot Bike Spaceship Lifestyle)
 
 for SCENES in ${scenes[@]}
@@ -16,15 +17,15 @@ echo ${SCENES}
 
 ######baseline
 
-python train.py \
-    --root_dir ${ROOT_DIR}/${SCENES} \
-    --dataset_name nsvf \
-    --exp_name Synthetic_NSVF/Hash/fewshot10/${SCENES}/ \
-    --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
-    --rgb_channels 128 --rgb_layers 2 \
-    --grid Hash \
-    --start 10 \
-    --vs_seed 66985 --no_save_vs
+#python train.py \
+#    --root_dir ${ROOT_DIR}/${SCENES} \
+#    --dataset_name nsvf \
+#    --exp_name Synthetic_NSVF/Hash/fewshot10/${SCENES}/ \
+#    --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
+#    --rgb_channels 128 --rgb_layers 2 \
+#    --grid Hash \
+#    --start 10 \
+#    --vs_seed 66985 --no_save_vs
 
 ######################### random vs
 

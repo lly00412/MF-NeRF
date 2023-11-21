@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="Remote Python 3.8.18 (sftp://lchen39@155.246.167.6:22/home/lchen39/.conda/envs/mf-nerf/bin/python)" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Remote Python 3.8.18 (sftp://lchen39@155.246.167.6:22/home/lchen39/.conda/envs/mf-nerf/bin/python)" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Remote Python 3.8.18 (sftp://lchen39@155.246.167.22:22/home/lchen39/projects/MF-NeRF/bin/python)" project-jdk-type="Python SDK" />
 </project>
