@@ -69,6 +69,8 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
     opacity = torch.zeros(N_rays, device=device)
     depth = torch.zeros(N_rays, device=device)
     rgb = torch.zeros(N_rays, 3, device=device)
+    if kwargs.get('entropy', False):
+        entropy = torch.zeros(N_rays, device=device)
 
     samples = total_samples = 0
     alive_indices = torch.arange(N_rays, device=device)
@@ -123,12 +125,10 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         rgbs = rearrange(rgbs, '(n1 n2) c -> n1 n2 c', n2=N_samples)
 
         if kwargs.get('entropy', False):
-            entropy = torch.zeros(N_rays, device=device)
             vren.composite_test_with_entropy_fw(
                 sigmas, rgbs, deltas, ts,
                 hits_t[:, 0], alive_indices, kwargs.get('T_threshold', 1e-4),
                 N_eff_samples, opacity, depth, entropy, rgb)
-            results['entropy'] = entropy
         else:
             vren.composite_test_fw(
                 sigmas, rgbs, deltas, ts,
@@ -136,6 +136,8 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
                 N_eff_samples, opacity, depth, rgb)
         alive_indices = alive_indices[alive_indices>=0] # remove converged rays
 
+    if kwargs.get('entropy', False):
+        results['entropy'] = entropy
     results['opacity'] = opacity
     results['depth'] = depth
     results['rgb'] = rgb
@@ -177,16 +179,23 @@ def __render_rays_test_sparse(model, rays_o, rays_d, hits_t, **kwargs):
             kwargs[k] = torch.repeat_interleave(v[rays_a[:, 0]], rays_a[:, 2], 0)
     sigmas, rgbs = model(xyzs, dirs, **kwargs)
 
+    sigmas = sigmas.to(torch.float32)
+    rgbs = rgbs.contiguous().to(torch.float32)
+    results['deltas'] = results['deltas'].to(torch.float32)
+    results['ts'] = results['ts'].to(torch.float32)
+    T_threshold = kwargs.get('T_threshold', 1e-4)
+
+
     if kwargs.get('entropy', False):
         (_, results['opacity'],
          results['depth'],results['entropy'], results['rgb'], results['ws']) = \
-            vren.composite_train_with_entropy_fw(sigmas, rgbs.contiguous(), results['deltas'], results['ts'],
-                                    rays_a, kwargs.get('T_threshold', 1e-4))
+            vren.composite_train_with_entropy_fw(sigmas, rgbs, results['deltas'], results['ts'],
+                                    rays_a, T_threshold)
     else:
         (_, results['opacity'],
         results['depth'], results['rgb'], results['ws']) = \
-            vren.composite_train_fw(sigmas, rgbs.contiguous(), results['deltas'], results['ts'],
-                                 rays_a, kwargs.get('T_threshold', 1e-4))
+            vren.composite_train_fw(sigmas, rgbs, results['deltas'], results['ts'],
+                                 rays_a, T_threshold)
 
     if exp_step_factor==0: # synthetic
         rgb_bg = torch.ones(3, device=rays_o.device)

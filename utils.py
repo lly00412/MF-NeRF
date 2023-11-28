@@ -321,7 +321,8 @@ method_dict={
    'warp' : 'VS-NeRF',
     'mcd_d': 'MCD-Depth',
     'mcd_r':'MCD-RGB',
-    'rgb_err': 'RGB_Error'
+    'rgb_err': 'RGB_Error',
+    'entropy': 'Entropy'
 }
 
 def plot_roc(ROC_dict,fig_name, opt_label='rgb_err',intervals = 10):

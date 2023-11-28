@@ -4,7 +4,7 @@ import numpy as np
 import os
 from tqdm import tqdm
 
-from .ray_utils import get_ray_directions
+from .ray_utils import get_ray_directions,normalize_cams
 from .color_utils import read_image
 
 from .base import BaseDataset
@@ -83,27 +83,27 @@ class NSVFDataset(BaseDataset):
             elif split == 'test': prefix = '1_' # test set for real scenes
             else: raise ValueError(f'{split} split not recognized!')
             img_paths = sorted(glob.glob(os.path.join(self.root_dir, 'rgb', prefix+'*.png')))
-            poses = sorted(glob.glob(os.path.join(self.root_dir, 'pose', prefix+'*.txt')))
+            poses_path = sorted(glob.glob(os.path.join(self.root_dir, 'pose', prefix+'*.txt')))
 
 
             if split == 'train':
                 if self.subs is not None:
                     self.full = len(img_paths)
                     img_paths = np.array(img_paths)[self.subs]
-                    poses = np.array(poses)[self.subs]
+                    poses_path = np.array(poses_path)[self.subs]
 
                 elif self.fewshot > 0:
                     np.random.seed(self.seed)
                     self.full = len(img_paths)
                     self.subs = np.random.choice(len(img_paths), self.fewshot, replace=False)
                     img_paths = np.array(img_paths)[self.subs]
-                    poses = np.array(poses)[self.subs]
+                    poses_path = np.array(poses_path)[self.subs]
 
 
             print(f'Loading {len(img_paths)} {split} images ...')
             if split == 'train':
                 print(f'Training imgs are {self.subs}.')
-            for img_path, pose in tqdm(zip(img_paths, poses)):
+            for img_path, pose in tqdm(zip(img_paths, poses_path)):
                 c2w = np.loadtxt(pose)[:3]
                 c2w[:, 3] -= self.shift
                 c2w[:, 3] /= 2*self.scale # to bound the scene inside [-0.5, 0.5]
@@ -115,7 +115,6 @@ class NSVFDataset(BaseDataset):
                     img[np.all(img<=0.1, axis=-1)] = 1.0
 
                 self.rays += [img]
-
             self.rays = torch.FloatTensor(np.stack(self.rays)) # (N_images, hw, ?)
         self.cam_centers = np.array([pose[:3, 3:4] for pose in self.poses])
         self.poses = torch.FloatTensor(self.poses) # (N_images, 3, 4)

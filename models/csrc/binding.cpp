@@ -125,7 +125,7 @@ std::vector<torch::Tensor> composite_train_fw(
                 rays_a, opacity_threshold);
 }
 
-std::vector<torch::Tensor> composite_with_entropy_fw(
+std::vector<torch::Tensor> composite_train_with_entropy_fw(
     const torch::Tensor sigmas,
     const torch::Tensor rgbs,
     const torch::Tensor deltas,
@@ -139,7 +139,7 @@ std::vector<torch::Tensor> composite_with_entropy_fw(
     CHECK_INPUT(ts);
     CHECK_INPUT(rays_a);
 
-    return composite_train_fw_cu(
+    return composite_train_with_entropy_fw_cu(
                 sigmas, rgbs, deltas, ts,
                 rays_a, opacity_threshold);
 }

@@ -56,18 +56,18 @@ def err2img(err,flip=False):
                                   cv2.COLORMAP_JET)
     return err_img
 
-def depth2img(depth):
-    depth = (depth-depth.min())/(depth.max()-depth.min())
-    depth_img = cv2.applyColorMap((depth*255).astype(np.uint8),
-                                  cv2.COLORMAP_TURBO)
-    return depth_img
-
 def u2img(err,flip=False):
     err = (err / np.quantile(err, 0.9))*0.8
     err_img = cv2.applyColorMap((err*255).astype(np.uint8),
                                   cv2.COLORMAP_HOT)
     err_img = cv2.cvtColor(err_img,cv2.COLOR_BGR2RGB)
     return err_img
+
+def depth2img(depth):
+    depth = (depth-depth.min())/(depth.max()-depth.min())
+    depth_img = cv2.applyColorMap((depth*255).astype(np.uint8),
+                                  cv2.COLORMAP_TURBO)
+    return depth_img
 
 def depth2img_gray(depth):
     depth = (depth-depth.min())/(depth.max()-depth.min())
@@ -141,10 +141,13 @@ class NeRFSystem(LightningModule):
             kwargs['exposure'] = batch['exposure']
         if isvs:
             kwargs['to_cpu'] = True
-        if self.hparams.vs_by == 'entropy' or 'entropy' in self.hparams.u_by:
+            if self.hparams.vs_sample_rate < 1:
+                kwargs['sparse'] = True
+
+        if self.hparams.view_select and self.hparams.vs_by == 'entropy':
             kwargs['entropy'] = True
-        if self.hparams.vs_sample_rate<1:
-            kwargs['sparse'] = True
+        elif self.hparams.eval_u and 'entropy' in self.hparams.u_by:
+            kwargs['entropy'] = True
 
         return render(self.model, rays_o, rays_d, **kwargs)
 
@@ -348,6 +351,12 @@ class NeRFSystem(LightningModule):
             self.run_vs = True
             self.reweighted_samples = False
 
+        if not self.hparams.view_select and self.hparams.val_only:
+            self.no_save_test = self.hparams.no_save_test
+            self.save_output = self.hparams.save_output
+            self.run_vs = False
+            self.reweighted_samples = False
+
         self.val_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}'
         os.makedirs(self.val_dir, exist_ok=True)
 
@@ -376,8 +385,11 @@ class NeRFSystem(LightningModule):
             all_results += [sub_results]
         results = {}
         output_list = ['rgb','depth','opacity']
-        if self.hparams.vs_by == 'entropy' or 'entropy' in self.hparams.u_by:
+        if self.hparams.view_select and self.hparams.vs_by == 'entropy':
             output_list += ['entropy']
+        elif self.hparams.eval_u and 'entropy' in self.hparams.u_by:
+            output_list += ['entropy']
+
 
         for k in output_list:
             if all_results[0][k].dim() == 0:
@@ -390,8 +402,10 @@ class NeRFSystem(LightningModule):
     def entropy_uncert(self, results):
         opacity = results['opacity'].cpu()
         entropys = results['entropy'].cpu()  # (n_rays)
-        counts = (opacity > 0)
-        entropy_score = torch.mean(entropys[counts].flatten())
+        nan_mask = torch.isnan(entropys)
+        entropys[nan_mask] = 0
+        counts = (opacity > 0) & (entropys>0)
+        entropy_score = torch.nanmean(entropys[counts].flatten())
         return entropys.cpu(), counts.cpu(), entropy_score.cpu()
 
     def warp_uncert(self, batch, results, img_h, img_w, K, isdense=True):
@@ -495,20 +509,22 @@ class NeRFSystem(LightningModule):
             results['pix_idxs'] = pix_idxs
         else:
             results = self(batch, split='test',isvs=True)
-            results['pix_idxs'] = None
+            results['pix_idxs'] = torch.arange(img_h * img_w)
 
         if self.hparams.vs_by == 'warp':
             K = self.handout_dataset.K
             sigmas, counts, u_score = self.warp_uncert(batch, results,
                                                        img_h, img_w, K,
                                                         isdense=not (self.hparams.vs_sample_rate<1))
+            counts = counts.to(torch.long)
         if self.hparams.vs_by in ['mcd_d', 'mcd_r']:
             mcd_val = 'depth' if self.hparams.vs_by=='mcd_d' else 'rgb'
             sigmas, counts, u_score = self.mcd_uncert(batch,mcd_val,results['pix_idxs'],
                                                       isdense=not (self.hparams.vs_sample_rate<1))
+            counts = counts.to(torch.long)
         if self.hparams.vs_by == 'entropy':
             sigmas, counts, u_score = self.entropy_uncert(results)
-            counts = counts.to(torch.float)
+            counts = counts.to(torch.long)
         # opacity = results['opacity'].cpu()
         # print(f'img {img_id} uncert score:{u_score}')
         # print(f'Total resolution: {img_h * img_w}')
@@ -516,7 +532,8 @@ class NeRFSystem(LightningModule):
         # print(f'valid pxs: {(opacity > 0).sum()}')
 
         if not self.hparams.no_save_vs:
-            sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
+            # sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
+            sigmas = u2img(sigmas[counts > 0].cpu().numpy())
             sigmas = sigmas.squeeze(1)
             counts = counts.cpu().numpy()
             u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
@@ -547,7 +564,7 @@ class NeRFSystem(LightningModule):
             results['pix_idxs'] = pix_idxs
         else:
             results = self(batch, split='test', isvs=True)
-            results['pix_idxs'] = None
+            results['pix_idxs'] = torch.arange(img_h * img_w)
 
         if self.hparams.vs_by == 'warp':
             K = self.train_dataset.K
@@ -571,6 +588,8 @@ class NeRFSystem(LightningModule):
         rgb_gt = batch['rgb']
 
         results = self(batch,split='test')
+        img_w, img_h = self.test_dataset.img_wh
+        results['pix_idxs'] = torch.arange(img_h * img_w)
 
         logs = {}
         logs['img_idxs'] = batch['img_idxs']
@@ -616,6 +635,7 @@ class NeRFSystem(LightningModule):
             common_counts = 0
             img_w, img_h = self.test_dataset.img_wh
             for u_method in self.hparams.u_by:
+                print(u_method)
                 if u_method == 'warp':
                     K = self.test_dataset.K
                     sigmas, counts, u_score = self.warp_uncert(batch, results,
@@ -629,27 +649,30 @@ class NeRFSystem(LightningModule):
                     sigmas, counts, u_score = self.entropy_uncert(results)
                     counts = counts.to(torch.float)
 
+                counts = counts.to(torch.long)
+
                 logs[u_method] = u_score
                 common_counts += counts
                 u_dict[u_method] = sigmas
 
                 if not self.no_save_test:
-                    sigmas = err2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
+                    sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
                     sigmas = sigmas.squeeze(1)
                     counts = counts.cpu().numpy()
                     u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
                     u_img[counts > 0] = sigmas
                     u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
-                    imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{self.hparams.u_by}.png'), u_img)
+                    imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{u_method}_u.png'), u_img)
 
             if self.hparams.plot_roc:
-                val_mask = (common_counts>=len(self.hparams.u_by))
+                val_mask = (common_counts >= len(self.hparams.u_by))
                 rgb_pred = rearrange(results['rgb'].cpu(), '(h w) c -> h w c', h=h)
                 rgb_gt = rearrange(batch['rgb'].cpu(), '(h w) c -> h w c', h=h)
-                rgb_err = (rgb_pred-rgb_gt)**2
+                rgb_err = (rgb_pred - rgb_gt) ** 2
+                rgb_err = rgb_err.reshape(img_h * img_w, 3)
+
                 val_err = rgb_err[val_mask]
                 rgb_err = val_err.mean(-1).flatten().numpy()
-
                 ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(rgb_err, rgb_err)
 
                 for u_method in self.hparams.u_by:
@@ -692,7 +715,7 @@ class NeRFSystem(LightningModule):
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_pred.png'), rgb_pred)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_d.png'), depth2img(depth))
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_gt.png'), rgb_gt)
-            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), err2img(err.mean(-1)))
+            imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), u2img(err.mean(-1)))
 
             ########### save outputs ##################
             if self.save_output:
@@ -751,7 +774,7 @@ class NeRFSystem(LightningModule):
         runtime = current_time - self.star_time
         self.log('train/runtime(mins)', runtime / 60, True)
 
-        if self.hparams.val_only:
+        if self.hparams.val_only and self.hparams.view_select:
             self.run_vs = True
             self.reweighted_samples = False
 
