@@ -30,7 +30,7 @@
 #--N_vs 5 \
 #--method mcd_r
 
-export LOG_DIR=./logs/nsvf/Synthetic_NSVF/Hash/fewshot20_sparse/
+export LOG_DIR=./logs/nsvf/Synthetic_NSVF/Hash/fewshot20_sparse_v2/
 export CUDA_VISIBLE_DEVICES=0
 
 #python process_logs_landa.py \
@@ -45,20 +45,20 @@ export CUDA_VISIBLE_DEVICES=0
 #--N_vs 5 \
 #--method warp
 #
-#python process_logs_landa.py \
-#--log_dir ${LOG_DIR} \
-#--scenes Chair Drums Ficus Hotdog \
-#--N_vs 5 \
-#--method mcd_d
-#
-#python process_logs_landa.py \
-#--log_dir ${LOG_DIR} \
-#--scenes Chair Drums Ficus Hotdog \
-#--N_vs 5 \
-#--method mcd_r
+python process_logs_landa.py \
+--log_dir ${LOG_DIR} \
+--scenes Chair Drums Ficus Hotdog \
+--N_vs 5 \
+--method mcd_d
 
 python process_logs_landa.py \
 --log_dir ${LOG_DIR} \
 --scenes Chair Drums Ficus Hotdog \
 --N_vs 5 \
---method entropy
+--method mcd_r
+
+#python process_logs_landa.py \
+#--log_dir ${LOG_DIR} \
+#--scenes Chair Drums Ficus Hotdog \
+#--N_vs 5 \
+#--method entropy

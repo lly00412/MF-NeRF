@@ -30,7 +30,7 @@ if __name__ == '__main__':
         labels = ['22','24','26','28']
         evals = ['lpips_vgg','psnr','ssim']
         N_vs = args.N_vs
-        for i in range(0, args.N_vs):
+        for i in range(1, args.N_vs):
             acc = EventAccumulator(logs[i])
             acc.Reload()
             for eval in evals:

@@ -64,6 +64,8 @@ class GetVirtualCam:
 
     def get_scene_center_sparse(self):
         depth_map = self.ref_depth_map.clone().to(self.device)
+        if len(depth_map) > len(self.pixl_ids):
+            depth_map = depth_map[self.pixl_ids]
         height, width = self.img_h, self.img_w
 
         ref_c2w = torch.eye(4)

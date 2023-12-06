@@ -399,17 +399,31 @@ class NeRFSystem(LightningModule):
         del all_results
         return results
 
-    def entropy_uncert(self, results):
+    def entropy_uncert(self, results, isdense=True):
+        pix_ids = results['pix_idxs']
         opacity = results['opacity'].cpu()
         entropys = results['entropy'].cpu()  # (n_rays)
+        if not isdense:
+            if len(opacity) > len(pix_ids):
+                opacity = opacity[pix_ids]
+            if len(entropys) > (pix_ids):
+                entropys = entropys[pix_ids]
+
         nan_mask = torch.isnan(entropys)
         entropys[nan_mask] = 0
-        counts = (opacity > 0) & (entropys>0)
+        counts = (opacity > 0) & (entropys > 0)
         entropy_score = torch.nanmean(entropys[counts].flatten())
         return entropys.cpu(), counts.cpu(), entropy_score.cpu()
 
     def warp_uncert(self, batch, results, img_h, img_w, K, isdense=True):
         opacity = results['opacity'].cpu()  # (n_rays)
+        if self.hparams.vs_sample_rate < 1:
+            pix_idxs = results['pix_idxs']
+        else:
+            pix_idxs = torch.arange(img_h * img_w)
+        if len(opacity) > len(pix_idxs):
+            opacity = opacity[pix_idxs]
+
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         vargs = {'ref_c2w': batch['pose'].clone().cpu(),
                  'K': K.clone().cpu(),
@@ -424,17 +438,13 @@ class NeRFSystem(LightningModule):
         Vcam = GetVirtualCam(vargs)
         thetas = [self.hparams.theta, -self.hparams.theta, self.hparams.theta, -self.hparams.theta]
         rot_ax = ['x', 'x', 'y', 'y']
-        warp_depths = [vargs['ref_depth_map'].cpu()]
+        warp_depths = [vargs['ref_depth_map'][pix_idxs].cpu()]
         counts = 0
+
         for theta, ax in zip(thetas, rot_ax):
             new_c2w = Vcam.get_near_c2w(batch['pose'].clone().cpu(), theta=theta, axis=ax)
             v_results = self.render_virtual_cam(new_c2w, batch)
             v_depth = v_results['depth'].cpu()
-
-            if self.hparams.view_select and self.hparams.vs_sample_rate < 1:
-                pix_idxs = results['pix_idxs']
-            else:
-                pix_idxs = torch.arange(img_h * img_w)
 
             _, out_pix_idxs = warp_tgt_to_ref_sparse(results['depth'].cpu(), new_c2w, batch['pose'],
                                                      K,
@@ -538,7 +548,7 @@ class NeRFSystem(LightningModule):
             counts = counts.cpu().numpy()
             u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
             if self.hparams.vs_sample_rate < 1:
-                u_img[results['pix_idxs'].cpu().numpy()][counts > 0] = sigmas
+                u_img[results['pix_idxs'].cpu().numpy()[counts > 0]] = sigmas
                 u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
             else:
                 u_img[counts > 0] = sigmas
@@ -572,7 +582,7 @@ class NeRFSystem(LightningModule):
                                                        img_h, img_w, K,
                                                        isdense=not (self.hparams.vs_sample_rate < 1))
         if self.hparams.vs_by == 'entropy':
-            _, _, u_score = self.entropy_uncert(results)
+            _, _, u_score = self.entropy_uncert(results,isdense=not (self.hparams.vs_sample_rate < 1))
 
         if self.hparams.vs_by in ['mcd_d', 'mcd_r']:
             mcd_val = 'depth' if self.hparams.vs_by == 'mcd_d' else 'rgb'
@@ -634,19 +644,32 @@ class NeRFSystem(LightningModule):
             u_dict = {}
             common_counts = 0
             img_w, img_h = self.test_dataset.img_wh
+            if self.hparams.vs_sample_rate < 1:
+                total_rays = self.test_dataset.img_wh[0] * self.test_dataset.img_wh[1]
+                n_samples = int(self.hparams.vs_sample_rate * total_rays)
+                torch.random.manual_seed(self.hparams.vs_seed)
+                pix_idxs = torch.randperm(total_rays)[:n_samples]
+                results['pix_idxs'] = pix_idxs
+            else:
+                results['pix_idxs'] = None
+
+            dense_tag = not (self.hparams.vs_sample_rate < 1)
+            N_method = 0
+
             for u_method in self.hparams.u_by:
                 print(u_method)
+                N_method += 1
                 if u_method == 'warp':
                     K = self.test_dataset.K
                     sigmas, counts, u_score = self.warp_uncert(batch, results,
                                                                img_h, img_w, K,
-                                                               isdense=True)
+                                                               isdense=dense_tag)
                 if u_method in ['mcd_d', 'mcd_r']:
                     mcd_val = 'depth' if u_method == 'mcd_d' else 'rgb'
                     sigmas, counts, u_score = self.mcd_uncert(batch, mcd_val, pix_idxs=None,
-                                                              isdense=True)
+                                                              isdense=dense_tag)
                 if u_method == 'entropy':
-                    sigmas, counts, u_score = self.entropy_uncert(results)
+                    sigmas, counts, u_score = self.entropy_uncert(results,isdense=dense_tag)
                     counts = counts.to(torch.float)
 
                 counts = counts.to(torch.long)
@@ -660,18 +683,27 @@ class NeRFSystem(LightningModule):
                     sigmas = sigmas.squeeze(1)
                     counts = counts.cpu().numpy()
                     u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
-                    u_img[counts > 0] = sigmas
-                    u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
+                    if self.hparams.vs_sample_rate < 1:
+                        u_img[results['pix_idxs'].cpu().numpy()[counts > 0]] = sigmas
+                        u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
+                    else:
+                        u_img[counts > 0] = sigmas
+                        u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
                     imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{u_method}_u.png'), u_img)
 
             if self.hparams.plot_roc:
-                val_mask = (common_counts >= len(self.hparams.u_by))
+                if self.hparams.vs_sample_rate < 1:
+                    pix_idxs = results['pix_idxs']
+                else:
+                    pix_idxs = torch.arange(img_h * img_w)
+
                 rgb_pred = rearrange(results['rgb'].cpu(), '(h w) c -> h w c', h=h)
                 rgb_gt = rearrange(batch['rgb'].cpu(), '(h w) c -> h w c', h=h)
                 rgb_err = (rgb_pred - rgb_gt) ** 2
                 rgb_err = rgb_err.reshape(img_h * img_w, 3)
 
-                val_err = rgb_err[val_mask]
+                val_mask = (common_counts >= N_method)
+                val_err = rgb_err[pix_idxs][val_mask]
                 rgb_err = val_err.mean(-1).flatten().numpy()
                 ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(rgb_err, rgb_err)
 

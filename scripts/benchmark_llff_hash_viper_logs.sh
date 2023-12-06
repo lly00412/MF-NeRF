@@ -1,5 +1,5 @@
 #!/bin/bash
-export LOG_DIR=./logs/colmap/nerf_llff/Hash/res0.25/fewshot15_sparse/
+export LOG_DIR=./logs/colmap/nerf_llff/Hash/res0.25/fewshot15_sr0.2/
 export CUDA_VISIBLE_DEVICES=1
 
 python process_logs_landa.py \

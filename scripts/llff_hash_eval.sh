@@ -1,12 +1,12 @@
 #!/bin/bash
 
 export ROOT_DIR=/mnt/Data2/datasets/nerf_llff_data/
-export BASE_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/nerf_llff/Hash/res0.25/fewshot10/
+export BASE_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/nerf_llff/Hash/res0.25/fewshot15_sr0.2/
 export CKPT_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/nerf_llff/Hash/fewshot15_v1/
 export CUDA_VISIBLE_DEVICES=0
 
 #scenes=(horns trex fortress room)
-scenes=(horns fortress room trex)
+scenes=(horns)
 
 ######baseline
 for SCENES in ${scenes[@]}
@@ -16,15 +16,17 @@ python train.py \
     --root_dir ${ROOT_DIR}/${SCENES} \
     --dataset_name colmap \
     --downsample 0.25 \
-    --exp_name nerf_llff/Hash/res0.25/fewshot10/${SCENES}/ \
+    --exp_name nerf_llff/Hash/res0.25/fewshot15_sr0.2/${SCENES}/reweighted/theta_3/warp/vs4/sparse_30ps/ \
     --num_epochs 20 --batch_size 4096 --scale 16.0 --lr 2e-2 --eval_lpips \
     --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
     --rgb_channels 64 --rgb_layers 2 \
     --random_bg \
     --vs_seed 349 \
+    --vs_sample_rate 0.1 \
     --start 10 \
-    --val_only --ckpt_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \
-    --eval_u --u_by warp mcd_d mcd_r \
+    --val_only --ckpt_path ${BASE_DIR}/${SCENES}/reweighted/theta_3/warp/vs4/epoch=19.ckpt \
+    --eval_u --u_by mcd_d mcd_r \
+    --n_passes 30 \
     --plot_roc
 done
 #

@@ -3,9 +3,9 @@
 losses=l2
 export ROOT_DIR=/media/landa/lchen39/datasets/Synthetic_NeRF/
 export BASE_DIR=~/projects/MF-NeRF/ckpts/nsvf/Synthetic_NSVF/Hash/fewshot10/
-export CKPT_DIR=~/projects/MF-NeRF/ckpts/nsvf/Synthetic_NSVF/Hash/fewshot20/
+export CKPT_DIR=~/projects/MF-NeRF/ckpts/nsvf/Synthetic_NeRF/Hash/fewshot20/
 export CUDA_VISIBLE_DEVICES=0
-export PREFIX=Synthetic_NSVF/Hash/fewshot20_sparse_v2
+export PREFIX=Synthetic_NeRF/Hash/fewshot15_v2
 
 scenes=(Hotdog Chair Drums Ficus)
 
@@ -80,7 +80,7 @@ python train_nsvf.py \
     --start 10 --N_vs 4 --view_step 1 --epoch_step 20 \
     --n_centers 10 \
     --vs_by mcd_d --n_passes 10 --p 0.2 \
-    --vs_sample_rate 0.1
+    --vs_sample_rate 1.0
 ##
 ################################# mcd_r
 ##
@@ -98,7 +98,7 @@ python train_nsvf.py \
     --start 10 --N_vs 4 --view_step 1 --epoch_step 20 \
     --n_centers 10 \
     --vs_by mcd_r --n_passes 10 --p 0.2 \
-    --vs_sample_rate 0.1
+    --vs_sample_rate 1.0
 
 ###################### entropy
 #python train_nsvf.py \

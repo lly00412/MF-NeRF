@@ -89,10 +89,10 @@ class NGP(nn.Module):
         #     nn.Dropout(p=0),
         #     nn.Linear(128, 3,bias=False),
         # )
-
+        self.dropout = nn.Dropout(p=0)
         self.rgb_net = torch.nn.Sequential(
             self.rgb_mlp,
-            nn.Dropout(p=0),
+            self.dropout,
             nn.Linear(128, 3,bias=False),
         )
 
@@ -122,6 +122,7 @@ class NGP(nn.Module):
         """
         x = (x-self.xyz_min)/(self.xyz_max-self.xyz_min)
         h = self.xyz_encoder(x)
+        h = self.dropout(h)
         sigmas = TruncExp.apply(h[:, 0])
         if return_feat: return sigmas, h
         return sigmas
