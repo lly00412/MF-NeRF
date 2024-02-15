@@ -880,10 +880,11 @@ if __name__ == '__main__':
     start_imgs = hparams.train_imgs
     holdout_imgs = np.delete(full_imgs,start_imgs)
     addon_choice = np.random.choice(len(holdout_imgs),hparams.N_more,replace=False)
+    prefix = hparams.exp_name
 
     for choice in addon_choice:
         hparams.train_imgs = np.append(start_imgs,holdout_imgs[choice])
-        hparams.exp_name = os.path.join(hparams.exp_name,f'vs{holdout_imgs[choice]}')
+        hparams.exp_name = os.path.join(prefix,f'vs{holdout_imgs[choice]}')
 
         pytorch_lightning.seed_everything(hparams.seed)
         if hparams.val_only and (not hparams.ckpt_path):
