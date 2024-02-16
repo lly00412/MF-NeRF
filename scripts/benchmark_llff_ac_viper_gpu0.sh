@@ -8,21 +8,21 @@ export CUDA_VISIBLE_DEVICES=0
 scenes=(room horns)
 
 ######baseline
-#for SCENES in ${scenes[@]}
-#do
-#echo ${SCENES}
-#python train.py \
-#    --root_dir ${ROOT_DIR}/${SCENES} \
-#    --dataset_name colmap \
-#    --downsample 0.25 \
-#    --exp_name nerf_llff/Hash/res0.25/fewshot10/${SCENES}/ \
-#    --num_epochs 20 --batch_size 4096 --scale 16.0 --lr 2e-2 --eval_lpips \
-#    --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
-#    --rgb_channels 64 --rgb_layers 2 \
-#    --random_bg \
-#    --vs_seed 349 \
-#    --start 10
-#done
+for SCENES in ${scenes[@]}
+do
+echo ${SCENES}
+python train.py \
+    --root_dir ${ROOT_DIR}/${SCENES} \
+    --dataset_name colmap \
+    --downsample 0.25 \
+    --exp_name nerf_llff/Hash/res0.25/fewshot10/${SCENES}/ \
+    --num_epochs 20 --batch_size 4096 --scale 16.0 --lr 2e-2 --eval_lpips \
+    --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
+    --rgb_channels 64 --rgb_layers 2 \
+    --random_bg \
+    --vs_seed 349 \
+    --start 10
+done
 #
 ##### without vs
 #for SCENES in ${scenes[@]}

@@ -878,14 +878,77 @@ if __name__ == '__main__':
     np.random.seed(hparams.vs_seed)
     full_imgs = np.arange(100)
     start_imgs = hparams.train_imgs
-    holdout_imgs = np.delete(full_imgs,start_imgs)
-    addon_choice = np.random.choice(len(holdout_imgs),hparams.N_more,replace=False)
-    prefix = hparams.exp_name
 
-    for choice in addon_choice:
-        hparams.train_imgs = np.append(start_imgs,holdout_imgs[choice])
-        hparams.exp_name = os.path.join(prefix,f'vs{holdout_imgs[choice]}')
+    if hparams.N_more > 0:
 
+        holdout_imgs = np.delete(full_imgs,start_imgs)
+        addon_choice = np.random.choice(len(holdout_imgs),hparams.N_more,replace=False)
+        prefix = hparams.exp_name
+
+        for choice in addon_choice:
+            hparams.train_imgs = np.append(start_imgs,holdout_imgs[choice])
+            hparams.exp_name = os.path.join(prefix,f'vs{holdout_imgs[choice]}')
+
+            pytorch_lightning.seed_everything(hparams.seed)
+            if hparams.val_only and (not hparams.ckpt_path):
+                raise ValueError('You need to provide a @ckpt_path for validation!')
+
+            if hparams.val_only:
+                system = NeRFSystem.load_from_checkpoint(hparams.ckpt_path, strict=False, hparams=hparams)
+            else:
+                system = NeRFSystem(hparams)
+
+            ckpt_cb = ModelCheckpoint(dirpath=f'ckpts/{hparams.dataset_name}/{hparams.exp_name}',
+                                      filename='{epoch:d}',
+                                      save_weights_only=True,
+                                      every_n_epochs=hparams.num_epochs,
+                                      save_on_train_epoch_end=True,
+                                      save_top_k=-1)
+            callbacks = [ckpt_cb, TQDMProgressBar(refresh_rate=1)]
+
+            os.makedirs(os.path.join(f"logs/{hparams.dataset_name}", hparams.exp_name), exist_ok=True)
+            logger = TensorBoardLogger(save_dir=f"logs/{hparams.dataset_name}",
+                                       name=hparams.exp_name,
+                                       default_hp_metric=False)
+
+            trainer = Trainer(max_epochs=0 if hparams.val_only else hparams.num_epochs,
+                              check_val_every_n_epoch=hparams.num_epochs,
+                              callbacks=callbacks,
+                              logger=logger,
+                              enable_model_summary=False,
+                              accelerator='gpu',
+                              devices=hparams.num_gpus,
+                              strategy=DDPPlugin(find_unused_parameters=False)
+                                       if hparams.num_gpus>1 else None,
+                              num_sanity_val_steps=-1 if (hparams.val_only or hparams.weight_path) else 0,
+                              precision=16)
+
+            trainer.fit(system)
+            # trainer.fit(system, ckpt_path=hparams.ckpt_path)
+
+            if not hparams.val_only: # save slimmed ckpt for the last epoch
+                ckpt_ = \
+                    slim_ckpt(f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/epoch={hparams.num_epochs-1}.ckpt',
+                              save_poses=hparams.optimize_ext)
+                torch.save(ckpt_, f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/epoch={hparams.num_epochs-1}_slim.ckpt')
+
+            if (not hparams.no_save_test) and \
+               hparams.dataset_name=='nsvf' and \
+               'Synthetic' in hparams.root_dir: # save video
+                imgs_rgb = sorted(glob.glob(os.path.join(system.val_dir, '*_pred.png')))
+                imgs_depth = sorted(glob.glob(os.path.join(system.val_dir, '*_d.png')))
+                imgs_err = sorted(glob.glob(os.path.join(system.val_dir, '*_e.png')))
+                imageio.mimsave(os.path.join(system.val_dir, 'rgb.mp4'),
+                                [imageio.imread(img) for img in imgs_rgb],
+                                fps=30, macro_block_size=1)
+                imageio.mimsave(os.path.join(system.val_dir, 'depth.mp4'),
+                                [imageio.imread(img) for img in imgs_depth],
+                                fps=30, macro_block_size=1)
+                imageio.mimsave(os.path.join(system.val_dir, 'err.mp4'),
+                                [imageio.imread(img) for img in imgs_err],
+                                fps=30, macro_block_size=1)
+
+    else:
         pytorch_lightning.seed_everything(hparams.seed)
         if hparams.val_only and (not hparams.ckpt_path):
             raise ValueError('You need to provide a @ckpt_path for validation!')
@@ -916,22 +979,23 @@ if __name__ == '__main__':
                           accelerator='gpu',
                           devices=hparams.num_gpus,
                           strategy=DDPPlugin(find_unused_parameters=False)
-                                   if hparams.num_gpus>1 else None,
+                          if hparams.num_gpus > 1 else None,
                           num_sanity_val_steps=-1 if (hparams.val_only or hparams.weight_path) else 0,
                           precision=16)
 
         trainer.fit(system)
         # trainer.fit(system, ckpt_path=hparams.ckpt_path)
 
-        if not hparams.val_only: # save slimmed ckpt for the last epoch
+        if not hparams.val_only:  # save slimmed ckpt for the last epoch
             ckpt_ = \
-                slim_ckpt(f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/epoch={hparams.num_epochs-1}.ckpt',
+                slim_ckpt(f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/epoch={hparams.num_epochs - 1}.ckpt',
                           save_poses=hparams.optimize_ext)
-            torch.save(ckpt_, f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/epoch={hparams.num_epochs-1}_slim.ckpt')
+            torch.save(ckpt_,
+                       f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/epoch={hparams.num_epochs - 1}_slim.ckpt')
 
         if (not hparams.no_save_test) and \
-           hparams.dataset_name=='nsvf' and \
-           'Synthetic' in hparams.root_dir: # save video
+                hparams.dataset_name == 'nsvf' and \
+                'Synthetic' in hparams.root_dir:  # save video
             imgs_rgb = sorted(glob.glob(os.path.join(system.val_dir, '*_pred.png')))
             imgs_depth = sorted(glob.glob(os.path.join(system.val_dir, '*_d.png')))
             imgs_err = sorted(glob.glob(os.path.join(system.val_dir, '*_e.png')))

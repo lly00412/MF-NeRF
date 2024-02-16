@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export ROOT_DIR=/home/ubuntu/data/nerf_data/Synthetic_NeRF
+export ROOT_DIR=/mnt/Data2/datasets/Synthetic_NeRF/
 
 python train.py \
     --root_dir $ROOT_DIR/Chair \
