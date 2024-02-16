@@ -658,25 +658,25 @@ class NeRFSystem(LightningModule):
                 #     sigmas = u_dict[theta][val_mask].numpy()
                 #     ROC_dict[theta], AUC_dict[theta] = compute_roc(rgb_err, sigmas)
 
-            logs['ROC'] = ROC_dict.copy()
-            logs['AUC'] = AUC_dict.copy()
+                logs['ROC'] = ROC_dict.copy()
+                logs['AUC'] = AUC_dict.copy()
 
-            fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
-            # fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc_thetas.png')
+                fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
+                # fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc_thetas.png')
 
-            plot_roc(ROC_dict, fig_name, opt_label='rgb_err')
+                plot_roc(ROC_dict, fig_name, opt_label='rgb_err')
 
-            auc_log = os.path.join(self.val_dir, f'{img_id:03d}_auc.txt')
-            with open(auc_log, 'a') as f:
-                for u_method in self.hparams.u_by:
-                    if u_method in ['mcd_d', 'mcd_r']:
-                        f.write(f'{u_method} params: \n')
-                        f.write(f'n_passes = {self.hparams.n_passes}\n')
-                        f.write(f'drop prob = {self.hparams.p}\n')
-                f.write(f' auc socres: \n')
-                for key in AUC_dict.keys():
-                    f.write(f' {key} auc =  {AUC_dict[key]* 100.:.4f}\n')
-                f.close()
+                auc_log = os.path.join(self.val_dir, f'{img_id:03d}_auc.txt')
+                with open(auc_log, 'a') as f:
+                    for u_method in self.hparams.u_by:
+                        if u_method in ['mcd_d', 'mcd_r']:
+                            f.write(f'{u_method} params: \n')
+                            f.write(f'n_passes = {self.hparams.n_passes}\n')
+                            f.write(f'drop prob = {self.hparams.p}\n')
+                    f.write(f' auc socres: \n')
+                    for key in AUC_dict.keys():
+                        f.write(f' {key} auc =  {AUC_dict[key]* 100.:.4f}\n')
+                    f.close()
 
         if not self.no_save_test: # save test image to disk
             idx = batch['img_idxs']
@@ -690,6 +690,17 @@ class NeRFSystem(LightningModule):
             rgb_gt = (rgb_gt * 255).astype(np.uint8)
             ############################
 
+            if hparams.vs_sample_rate<1:
+                err_img = np.zeros((h * w, 3)).astype(np.uint8)
+                err_full = err
+                err_full = u2img(err_full.mean(-1))
+                err_full = rearrange(err_full, 'h w c -> (h w) c', h=h)
+                err_img[results['pix_idxs'].cpu().numpy()] = err_full[results['pix_idxs'].cpu().numpy()]
+                err_img = rearrange(err_img, '(h w) c -> h w c', h=h)
+                imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e_sparse.png'), err_img)
+
+            ##############################
+
             rgb_pred = (rgb_pred*255).astype(np.uint8)
             depth = rearrange(results['depth'].cpu().numpy(), '(h w) -> h w', h=h)
             outputs['data']['depth'] = depth
@@ -697,6 +708,7 @@ class NeRFSystem(LightningModule):
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_d.png'), depth2img_gray(depth))
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_gt.png'), rgb_gt)
             imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_e.png'), u2img(err.mean(-1)))
+
 
             ########### save outputs ##################
             if self.save_output:
@@ -891,7 +903,11 @@ if __name__ == '__main__':
 
             pytorch_lightning.seed_everything(hparams.seed)
             if hparams.val_only and (not hparams.ckpt_path):
-                raise ValueError('You need to provide a @ckpt_path for validation!')
+                ckpt_path = f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/epoch={hparams.num_epochs-1}.ckpt'
+                if os.path.exists(ckpt_path):
+                    hparams.ckpt_path=ckpt_path
+                else:
+                    raise ValueError('You need to provide a @ckpt_path for validation!')
 
             if hparams.val_only:
                 system = NeRFSystem.load_from_checkpoint(hparams.ckpt_path, strict=False, hparams=hparams)
@@ -951,7 +967,11 @@ if __name__ == '__main__':
     else:
         pytorch_lightning.seed_everything(hparams.seed)
         if hparams.val_only and (not hparams.ckpt_path):
-            raise ValueError('You need to provide a @ckpt_path for validation!')
+            ckpt_path = f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/epoch={hparams.num_epochs - 1}.ckpt'
+            if os.path.exists(ckpt_path):
+                hparams.ckpt_path = ckpt_path
+            else:
+                raise ValueError('You need to provide a @ckpt_path for validation!')
 
         if hparams.val_only:
             system = NeRFSystem.load_from_checkpoint(hparams.ckpt_path, strict=False, hparams=hparams)

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 losses=l2
-export ROOT_DIR=/mnt/Data2/datasets/Synthetic_NeRF/
+export ROOT_DIR=/mnt/Data2/nerf_datasets/Synthetic_NeRF/
 export BASE_DIR=~/mnt/Data2/liyan/MF-NeRF/ckpts/Synthetic_NeRF/Hash/fewshot10/
 export CKPT_DIR=~/mnt/Data2/liyan/MF-NeRF/ckpts/Synthetic_NeRF/Hash/fewshot11/
 export CUDA_VISIBLE_DEVICES=0
@@ -29,8 +29,10 @@ python data_generater.py \
     --vs_seed 66985 \
     --pre_train_epoch 20 \
     --start 10 --N_more 0 \
-    --train_imgs 57 27 32 63 92 19 85 40 20 69
-
+    --train_imgs 57 27 32 63 92 19 85 40 20 69 \
+    --val_only \
+    --eval_u --u_by warp --theta 3 \
+    --vs_sample_rate 0.2
 
 python data_generater.py \
     --root_dir ${ROOT_DIR}/${SCENES} \
@@ -42,6 +44,9 @@ python data_generater.py \
     --vs_seed 66985 \
     --pre_train_epoch 20 \
     --start 10 --N_more 20 \
-    --train_imgs 57 27 32 63 92 19 85 40 20 69
+    --train_imgs 57 27 32 63 92 19 85 40 20 69 \
+    --val_only \
+    --eval_u --u_by warp --theta 3 \
+    --vs_sample_rate 0.2
 
 done

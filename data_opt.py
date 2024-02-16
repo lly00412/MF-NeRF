@@ -89,6 +89,8 @@ def get_opts():
                         help='estimate uncertainty by warping / mcdropout depth / mcdropout rgb/ entropy')
     parser.add_argument('--plot_roc', action='store_true', default=False,
                         help='whether to plot roc of all estimation')
+    parser.add_argument('--vs_sample_rate', type=float, default=1.,
+                        help='percentage of sampling rays per view, 1 means rendering all rays')
 
     # mcdropout settings
     parser.add_argument("--n_passes", type=int, default=30,
