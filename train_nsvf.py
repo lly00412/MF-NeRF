@@ -775,6 +775,13 @@ class NeRFSystem(LightningModule):
             mean_lpips = all_gather_ddp_if_available(lpipss).mean()
             self.log('test/lpips_vgg', mean_lpips)
 
+        if self.hparams.eval_u:
+            for u_method in self.hparams.u_by:
+                u_scores = torch.stack([x[u_method] for x in outputs])
+                mean_u = all_gather_ddp_if_available(u_scores).mean()
+                self.log(f'test/u_{u_method}', mean_u))
+
+
         if self.hparams.plot_roc:
             ROCs = {}
             AUCs = {}

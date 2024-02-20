@@ -736,6 +736,12 @@ class NeRFSystem(LightningModule):
             mean_lpips = all_gather_ddp_if_available(lpipss).mean()
             self.log('test/lpips_vgg', mean_lpips)
 
+        if self.hparams.eval_u:
+            for u_method in self.hparams.u_by:
+                u_scores = torch.stack([x[u_method] for x in outputs])
+                mean_u = all_gather_ddp_if_available(u_scores).mean()
+                self.log(f'test/u_{u_method}', mean_u)
+
         # thetas = [1, 3, 5, 7]
         # vsb_dict = {}
         # for theta in thetas:
@@ -927,8 +933,8 @@ if __name__ == '__main__':
                                        name=hparams.exp_name,
                                        default_hp_metric=False)
 
-            trainer = Trainer(max_epochs=0 if hparams.val_only else hparams.num_epochs,
-                              check_val_every_n_epoch=hparams.num_epochs,
+            trainer = Trainer(max_epochs=1 if hparams.val_only else hparams.num_epochs,
+                              check_val_every_n_epoch=1 if hparams.val_only else hparams.num_epochs,
                               callbacks=callbacks,
                               logger=logger,
                               enable_model_summary=False,
@@ -936,7 +942,8 @@ if __name__ == '__main__':
                               devices=hparams.num_gpus,
                               strategy=DDPPlugin(find_unused_parameters=False)
                                        if hparams.num_gpus>1 else None,
-                              num_sanity_val_steps=-1 if (hparams.val_only or hparams.weight_path) else 0,
+                              # num_sanity_val_steps=-1 if (hparams.val_only or hparams.weight_path) else 0,
+                              num_sanity_val_steps= 0,
                               precision=16)
 
             trainer.fit(system)
@@ -991,8 +998,8 @@ if __name__ == '__main__':
                                    name=hparams.exp_name,
                                    default_hp_metric=False)
 
-        trainer = Trainer(max_epochs=0 if hparams.val_only else hparams.num_epochs,
-                          check_val_every_n_epoch=hparams.num_epochs,
+        trainer = Trainer(max_epochs=1 if hparams.val_only else hparams.num_epochs,
+                          check_val_every_n_epoch=1 if hparams.val_only else hparams.num_epochs,
                           callbacks=callbacks,
                           logger=logger,
                           enable_model_summary=False,
@@ -1000,7 +1007,8 @@ if __name__ == '__main__':
                           devices=hparams.num_gpus,
                           strategy=DDPPlugin(find_unused_parameters=False)
                           if hparams.num_gpus > 1 else None,
-                          num_sanity_val_steps=-1 if (hparams.val_only or hparams.weight_path) else 0,
+                          # num_sanity_val_steps=-1 if (hparams.val_only or hparams.weight_path) else 0,
+                          num_sanity_val_steps=0,
                           precision=16)
 
         trainer.fit(system)
