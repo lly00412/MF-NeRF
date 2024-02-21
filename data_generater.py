@@ -489,6 +489,7 @@ class NeRFSystem(LightningModule):
         if self.hparams.vs_by == 'entropy':
             sigmas, counts, u_score = self.entropy_uncert(results, isdense=dense_tag)
 
+        u_hist = None
         if self.hparams.u_hist:
             norm_sigmas = sigmas.flatten()
             valid = (norm_sigmas > 0)
@@ -504,6 +505,11 @@ class NeRFSystem(LightningModule):
             hist_fig = os.path.join(self.val_dir, f'eval_vs/{img_id:03d}_u_hist.png')
             plot_u_hist(norm_sigmas, hist_fig, n_bins=20)
 
+            u_hist,_ = torch.histogram(norm_sigmas,10,density=True)
+            u_hist = u_hist/u_hist.sum()
+
+
+
         if not self.hparams.no_save_vs:
             sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
             sigmas = sigmas.squeeze(1)
@@ -517,7 +523,7 @@ class NeRFSystem(LightningModule):
                 u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
             imageio.imsave(os.path.join(self.val_dir, f'eval_vs/{img_id:03d}_{self.hparams.vs_by}_vsu.png'), u_img)
 
-        return u_score
+        return u_score,u_hist
 
     def validation_step(self, batch, batch_nb):
         img_id = batch['img_idxs']
@@ -795,18 +801,22 @@ class NeRFSystem(LightningModule):
         if self.hparams.view_select:
             vs_loader = self.viewselect_loader()
             view_uncert_scores = []
+            u_hists = []
             pbar = tqdm(total=len(self.hparams.vs_imgs))
             for batch_idx, batch in enumerate(vs_loader):
-                vs_score = self.view_select_step(batch, batch_idx)
+                vs_score,u_hist = self.view_select_step(batch, batch_idx)
                 view_uncert_scores.append(vs_score)
+                u_hists.append(u_hist)
                 pbar.update(1)
             pbar.close()
 
             views = self.hparams.vs_imgs
-            result_df = pd.DataFrame()
+            result_df = pd.DataFrame(columns=['views','warp_u','u_hist'])
+            result_df['u_hist'] = result_df['u_hist'].astype(object)
             for i in range(len(views)):
                 result_df.at[i, 'views'] = views[i]
                 result_df.at[i, 'warp_u'] = view_uncert_scores[i].item()
+                result_df.at[i, 'u_hist'] = u_hists[i].tolist()
 
             csv_file = os.path.join(self.val_dir, f'eval_vs/vsu_scores.csv')
             print(f'Save to {csv_file}')
