@@ -86,18 +86,18 @@ class NSVFDataset(BaseDataset):
             poses_path = sorted(glob.glob(os.path.join(self.root_dir, 'pose', prefix+'*.txt')))
 
 
-            if split == 'train':
-                if self.subs is not None:
-                    self.full = len(img_paths)
-                    img_paths = np.array(img_paths)[self.subs]
-                    poses_path = np.array(poses_path)[self.subs]
+            # if split == 'train':
+            if self.subs is not None:
+                self.full = len(img_paths)
+                img_paths = np.array(img_paths)[self.subs]
+                poses_path = np.array(poses_path)[self.subs]
 
-                elif self.fewshot > 0:
-                    np.random.seed(self.seed)
-                    self.full = len(img_paths)
-                    self.subs = np.random.choice(len(img_paths), self.fewshot, replace=False)
-                    img_paths = np.array(img_paths)[self.subs]
-                    poses_path = np.array(poses_path)[self.subs]
+            elif self.fewshot > 0:
+                np.random.seed(self.seed)
+                self.full = len(img_paths)
+                self.subs = np.random.choice(len(img_paths), self.fewshot, replace=False)
+                img_paths = np.array(img_paths)[self.subs]
+                poses_path = np.array(poses_path)[self.subs]
 
 
             print(f'Loading {len(img_paths)} {split} images ...')

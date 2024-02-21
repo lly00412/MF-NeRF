@@ -46,6 +46,8 @@ from tqdm import trange
 
 import warnings; warnings.filterwarnings("ignore")
 
+import pandas as pd
+
 
 def err2img(err,flip=False):
     if flip:
@@ -176,7 +178,17 @@ class NeRFSystem(LightningModule):
             self.train_dataset.p = p
             self.train_dataset.trained_epochs = trained_epochs
 
-        self.test_dataset = dataset(split='test', **kwargs)
+        self.test_dataset = dataset(split='test',
+                                    fewshot=10,**kwargs)
+
+        if self.hparams.view_select:
+            self.handout_dataset = dataset(split='train',
+                                           subs=self.hparams.vs_imgs,
+                                           seed=self.hparams.vs_seed,
+                                           **kwargs)
+            self.handout_dataset.split = 'test'
+
+        # self.test_dataset = dataset(split='test',**kwargs)
 
     def configure_optimizers(self):
         # define additional parameters
@@ -234,11 +246,11 @@ class NeRFSystem(LightningModule):
                           pin_memory=pin,
                           shuffle=False)
 
-    # def viewselect_loader(self):
-    #     return DataLoader(self.handout_dataset,
-    #                       num_workers=8,
-    #                       batch_size=None,
-    #                       pin_memory=True)
+    def viewselect_loader(self):
+        return DataLoader(self.handout_dataset,
+                          num_workers=8,
+                          batch_size=None,
+                          pin_memory=True)
 
     def on_train_start(self):
         self.model.mark_invisible_cells(self.train_dataset.K.to(self.device),
@@ -285,6 +297,10 @@ class NeRFSystem(LightningModule):
 
         self.val_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}'
         os.makedirs(self.val_dir, exist_ok=True)
+
+        if self.hparams.view_select:
+            vs_path = f'{self.val_dir}/eval_vs'
+            os.makedirs(vs_path, exist_ok=True)
 
         if self.save_output:
             self.out_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}/output/'
@@ -435,54 +451,73 @@ class NeRFSystem(LightningModule):
         mcd_score = torch.mean(mcd_sigmas[counts > 0].flatten())
         return mcd_sigmas.cpu(), counts.cpu(), mcd_score.cpu()
 
-    # def view_select_step(self, batch,batch_nb):
-    #     torch.cuda.empty_cache()
-    #     img_id = self.handout_dataset.subs[batch_nb]
-    #     img_w, img_h = self.handout_dataset.img_wh
-    #
-    #     batch['pose'] = batch['pose'].to(self.device)
-    #
-    #     if self.hparams.vs_sample_rate < 1:
-    #         total_rays = self.handout_dataset.img_wh[0] * self.handou_dataset.img_wh[1]
-    #         n_samples = int(self.hparams.vs_sample_rate * total_rays)
-    #         torch.random.manual_seed(self.hparams.vs_seed)
-    #         pix_idxs = torch.randperm(total_rays)[:n_samples]
-    #         results = self.render_by_rays(pix_idxs, batch, self.hparams.vs_batch_size)
-    #         results['pix_idxs'] = pix_idxs
-    #     else:
-    #         results = self(batch, split='test',isvs=True)
-    #         results['pix_idxs'] = None
-    #
-    #     if self.hparams.vs_by == 'warp':
-    #         K = self.handout_dataset.K
-    #         sigmas, counts, u_score = self.warp_uncert(batch, results,
-    #                                                    img_h, img_w, K,self.hparams.theta,
-    #                                                     isdense=not (self.hparams.vs_sample_rate<1))
-    #     if self.hparams.vs_by in ['mcd_d', 'mcd_r']:
-    #         mcd_val = 'depth' if self.hparams.vs_by=='mcd_d' else 'rgb'
-    #         sigmas, counts, u_score = self.mcd_uncert(batch,mcd_val,results['pix_idxs'],
-    #                                                   isdense=not (self.hparams.vs_sample_rate<1))
-    #
-    #     # opacity = results['opacity'].cpu()
-    #     # print(f'img {img_id} uncert score:{u_score}')
-    #     # print(f'Total resolution: {img_h * img_w}')
-    #     # print(f'count pxs: {(counts > 0).sum()}')
-    #     # print(f'valid pxs: {(opacity > 0).sum()}')
-    #
-    #     if not self.hparams.no_save_vs:
-    #         sigmas = err2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
-    #         sigmas = sigmas.squeeze(1)
-    #         counts = counts.cpu().numpy()
-    #         u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
-    #         if self.hparams.vs_sample_rate < 1:
-    #             u_img[results['pix_idxs'].cpu().numpy()[counts > 0]] = sigmas
-    #             u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
-    #         else:
-    #             u_img[counts > 0] = sigmas
-    #             u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
-    #         imageio.imsave(os.path.join(self.vs_dir, f'{img_id:03d}_vsu.png'), u_img)
-    #
-    #     return u_score
+    def view_select_step(self, batch,batch_nb):
+        torch.cuda.empty_cache()
+        img_id = self.handout_dataset.subs[batch_nb]
+        img_w, img_h = self.handout_dataset.img_wh
+
+        batch['pose'] = batch['pose'].to(self.device)
+
+        dense_tag = not (self.hparams.vs_sample_rate < 1)
+
+        if self.hparams.vs_sample_rate < 1:
+            total_rays = self.handout_dataset.img_wh[0] * self.handou_dataset.img_wh[1]
+            n_samples = int(self.hparams.vs_sample_rate * total_rays)
+            torch.random.manual_seed(self.hparams.vs_seed)
+            pix_idxs = torch.randperm(total_rays)[:n_samples]
+            results = self.render_by_rays(pix_idxs, batch, self.hparams.vs_batch_size)
+            results['pix_idxs'] = pix_idxs
+        else:
+            results = self(batch, split='test')
+            results['pix_idxs'] = None
+
+        if self.hparams.vs_by == 'warp':
+            K = self.handout_dataset.K
+            # for theta in thetas:
+            #     sigmas, counts, u_score = self.warp_uncert(batch, results,
+            #                                            img_h, img_w, K, theta,
+            #                                            isdense=True)
+            sigmas, counts, u_score = self.warp_uncert(batch, results,
+                                                       img_h, img_w, K,
+                                                       isdense=dense_tag)
+
+        if self.hparams.vs_by in ['mcd_d', 'mcd_r']:
+            mcd_val = 'depth' if self.hparams.vs_by == 'mcd_d' else 'rgb'
+            sigmas, counts, u_score = self.mcd_uncert(batch, mcd_val, pix_idxs=results['pix_idxs'],
+                                                      isdense=dense_tag)
+
+        if self.hparams.vs_by == 'entropy':
+            sigmas, counts, u_score = self.entropy_uncert(results, isdense=dense_tag)
+
+        if self.hparams.u_hist:
+            norm_sigmas = sigmas.flatten()
+            valid = (norm_sigmas > 0)
+            norm_sigmas = norm_sigmas[valid]
+            q1 = torch.quantile(norm_sigmas, 0.25)
+            q3 = torch.quantile(norm_sigmas, 0.75)
+            IQR = q3 - q1
+            b_min = q1 - 1.5 * IQR
+            b_max = q3 + 1.5 * IQR
+            mask = (norm_sigmas > b_min) & (norm_sigmas < b_max)
+            norm_sigmas = norm_sigmas[mask]
+
+            hist_fig = os.path.join(self.val_dir, f'eval_vs/{img_id:03d}_u_hist.png')
+            plot_u_hist(norm_sigmas, hist_fig, n_bins=20)
+
+        if not self.hparams.no_save_vs:
+            sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
+            sigmas = sigmas.squeeze(1)
+            counts = counts.cpu().numpy()
+            u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
+            if self.hparams.vs_sample_rate < 1:
+                u_img[results['pix_idxs'].cpu().numpy()[counts > 0]] = sigmas
+                u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
+            else:
+                u_img[counts > 0] = sigmas
+                u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
+            imageio.imsave(os.path.join(self.val_dir, f'eval_vs/{img_id:03d}_{self.hparams.vs_by}_vsu.png'), u_img)
+
+        return u_score
 
     def validation_step(self, batch, batch_nb):
         img_id = batch['img_idxs']
@@ -598,6 +633,21 @@ class NeRFSystem(LightningModule):
                 print(f'sample_rate: {self.hparams.vs_sample_rate}')
                 print(f'u_means: {torch.nanmean(sigmas)}')
                 print(f'u_std: {np.nanstd(sigmas.cpu().numpy())}')
+
+                if self.hparams.u_hist:
+                    norm_sigmas = sigmas.flatten()
+                    valid = (norm_sigmas > 0)
+                    norm_sigmas = norm_sigmas[valid]
+                    q1 = torch.quantile(norm_sigmas,0.25)
+                    q3 = torch.quantile(norm_sigmas,0.75)
+                    IQR = q3-q1
+                    b_min = q1 - 1.5*IQR
+                    b_max = q3 + 1.5*IQR
+                    mask = (norm_sigmas>b_min)&(norm_sigmas<b_max)
+                    norm_sigmas = norm_sigmas[mask]
+
+                    hist_fig = os.path.join(self.val_dir, f'{img_id:03d}_u_hist.png')
+                    plot_u_hist(norm_sigmas,hist_fig,n_bins=20)
 
                 if not self.no_save_test:
                     sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
@@ -742,25 +792,25 @@ class NeRFSystem(LightningModule):
                 mean_u = all_gather_ddp_if_available(u_scores).mean()
                 self.log(f'test/u_{u_method}', mean_u)
 
-        # thetas = [1, 3, 5, 7]
-        # vsb_dict = {}
-        # for theta in thetas:
-        #     u_means =  torch.stack([x[f'theta{theta}/u_mean'] for x in outputs])
-        #     u_maxs = torch.stack([x[f'theta{theta}/u_max'] for x in outputs])
-        #     u_medians = torch.stack([x[f'theta{theta}/u_median'] for x in outputs])
-        #     count_pcts = torch.stack([x[f'theta{theta}/count'] for x in outputs])
-        #
-        #     mean_u_mean = all_gather_ddp_if_available(u_means).mean()
-        #     mean_u_max = all_gather_ddp_if_available(u_maxs).mean()
-        #     mean_u_median = all_gather_ddp_if_available(u_medians).mean()
-        #     mean_count = all_gather_ddp_if_available(count_pcts).mean()
-        #     vsb_dict[theta] = mean_count
-        #
-        #     print(f'theta = {theta}')
-        #     print(f'uncert mean:{mean_u_mean:.4f}')
-        #     print(f'uncert max:{mean_u_max:.4f}')
-        #     print(f'uncert median:{mean_u_median:.4f}')
-        #     print(f'count pct: {mean_count * 100:.2f}')
+        if self.hparams.view_select:
+            vs_loader = self.viewselect_loader()
+            view_uncert_scores = []
+            pbar = tqdm(total=len(self.hparams.vs_imgs))
+            for batch_idx, batch in enumerate(vs_loader):
+                vs_score = self.view_select_step(batch, batch_idx)
+                view_uncert_scores.append(vs_score)
+                pbar.update(1)
+            pbar.close()
+
+            views = self.hparams.vs_imgs
+            result_df = pd.DataFrame()
+            for i in range(len(views)):
+                result_df.at[i, 'views'] = views[i]
+                result_df.at[i, 'warp_u'] = view_uncert_scores[i].item()
+
+            csv_file = os.path.join(self.val_dir, f'eval_vs/vsu_scores.csv')
+            print(f'Save to {csv_file}')
+            result_df.to_csv(csv_file, index=False)
 
 
         if self.hparams.plot_roc:
@@ -772,13 +822,6 @@ class NeRFSystem(LightningModule):
             for u_method in self.hparams.u_by:
                 ROCs[u_method] = np.stack([x['ROC'][u_method] for x in outputs]).mean(0)
                 AUCs[u_method] = np.array([x['AUC'][u_method] for x in outputs]).mean(0)
-            # for theta in thetas:
-            #     ROCs[theta] = np.stack([x['ROC'][theta] for x in outputs]).mean(0)
-            #     AUCs[theta] = np.array([x['AUC'][theta] for x in outputs]).mean(0)
-            #     ROCs[f'{theta}/rgb_err'] = np.stack([x['ROC'][f'{theta}/rgb_err'] for x in outputs]).mean(0)
-            #     AUCs[f'{theta}/rgb_err'] = np.array([x['AUC'][f'{theta}/rgb_err'] for x in outputs]).mean(0)
-            #     AUCs[f'{theta}/counts'] = vsb_dict[theta]
-
 
             fig_name = os.path.join(self.val_dir, f'scene_avg_roc.png')
             plot_roc(ROCs, fig_name, opt_label='rgb_err')
@@ -795,93 +838,6 @@ class NeRFSystem(LightningModule):
                     f.write(f' {key} auc =  {AUCs[key] * 100.:.4f}\n')
                 f.close()
 
-        # do view selection
-        #
-        # current_time = time.time()
-        # runtime = current_time - self.star_time
-        # self.log('train/runtime(mins)', runtime / 60, True)
-        #
-        # if self.hparams.view_select:
-        #     if self.current_epoch in self.vs_epochs:
-        #         if self.hparams.ray_sampling_strategy == "more_new_images":
-        #             trained_epochs = self.train_dataset.trained_epochs
-        #         self.vs_dir = os.path.join(f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}/vs/',
-        #                                    f'epoch{self.current_epoch}')
-        #         os.makedirs(self.vs_dir, exist_ok=True)
-        #         print(f'Starting view selection Round {self.current_vs}!\n')
-        #         vs_start = time.time()
-        #         if self.hparams.vs_by == 'random':
-        #             np.random.seed(self.hparams.vs_seed)
-        #             choice = np.random.choice(len(self.handout_list), self.hparams.view_step, replace=False)
-        #         else:
-        #             dataset = dataset_dict[self.hparams.dataset_name]
-        #             kwargs = {'root_dir': self.hparams.root_dir,
-        #                       'downsample': self.hparams.downsample}
-        #             self.handout_dataset = dataset(split='train',
-        #                                            subs=self.handout_list,
-        #                                            seed=self.hparams.vs_seed,
-        #                                            **kwargs)
-        #             self.handout_dataset.split = 'test'
-        #             vs_loader = self.viewselect_loader()
-        #             view_uncert_scores = []
-        #             pbar = tqdm(total=len(self.handout_list))
-        #             for batch_idx, batch in enumerate(vs_loader):
-        #                 vs_score = self.view_select_step(batch, batch_idx)
-        #                 view_uncert_scores.append(vs_score)
-        #                 pbar.update(1)
-        #             pbar.close()
-        #
-        #             scores = torch.cat([x.reshape(1) for x in view_uncert_scores])
-        #             topks = torch.topk(scores, self.hparams.view_step)
-        #             choice = topks.indices.numpy()
-        #
-        #         new_train_list = np.append(self.train_dataset.subs, self.handout_list[choice])
-        #         vs_choice = self.handout_list[choice]
-        #         self.handout_list = np.delete(self.handout_list, choice)
-        #
-        #         dataset = dataset_dict[self.hparams.dataset_name]
-        #         kwargs = {'root_dir': self.hparams.root_dir,
-        #                   'downsample': self.hparams.downsample}
-        #         self.train_dataset = dataset(split=self.hparams.split,
-        #                                      subs=new_train_list,
-        #                                      seed=self.hparams.vs_seed,
-        #                                      **kwargs)
-        #         self.train_dataset.batch_size = self.hparams.batch_size
-        #         self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
-        #         if self.hparams.ray_sampling_strategy == "more_new_images":
-        #             N_train = len(self.train_dataset.subs)
-        #             p = np.ones(N_train)
-        #             trained_epochs = np.append(trained_epochs, np.zeros(self.hparams.view_step))
-        #             trained_epochs = trained_epochs + self.hparams.epoch_step
-        #             p /= trained_epochs
-        #             p /= p.sum()
-        #             self.train_dataset.p = p
-        #             self.train_dataset.trained_epochs = trained_epochs
-        #
-        #         # define additional parameters
-        #         self.register_buffer('directions', self.train_dataset.directions.to(self.device))
-        #         self.register_buffer('poses', self.train_dataset.poses.to(self.device))
-        #
-        #         self.current_vs += 1
-        #         vs_end = time.time()
-        #         self.vs_time += vs_end - vs_start
-        #         self.log('vs/runtime(mins)', self.vs_time / 60)
-        #
-        #         time_cost = time.strftime("%H:%M:%S", time.gmtime(vs_end - vs_start))
-        #         print(f'View selection by {self.hparams.vs_by}:  {vs_choice}')
-        #         print('Time for selection process: {}'.format(time_cost))
-        #
-        #         with open(self.vs_log, 'a') as f:
-        #             f.write(f'VS Round {self.current_vs}\n')
-        #             f.write(f'View Select by: {self.hparams.vs_by}\n')
-        #             f.write(f'Sample rate: {self.hparams.vs_sample_rate}')
-        #             f.write(f'Selected views: {vs_choice}\n')
-        #             f.write(f'Time for selection process: {time_cost}\n')
-        #             f.close()
-        #
-        #         if not (self.current_vs < self.hparams.N_vs):
-        #             self.hparams.view_select = False
-
     def get_progress_bar_dict(self):
         # don't show the version number
         items = super().get_progress_bar_dict()
@@ -897,7 +853,7 @@ if __name__ == '__main__':
     full_imgs = np.arange(100)
     start_imgs = hparams.train_imgs
 
-    if hparams.N_more > 0:
+    if hparams.N_more > 0 and not hparams.view_select:
 
         holdout_imgs = np.delete(full_imgs,start_imgs)
         addon_choice = np.random.choice(len(holdout_imgs),hparams.N_more,replace=False)
@@ -933,7 +889,7 @@ if __name__ == '__main__':
                                        name=hparams.exp_name,
                                        default_hp_metric=False)
 
-            trainer = Trainer(max_epochs=1 if hparams.val_only else hparams.num_epochs,
+            trainer = Trainer(max_epochs=0 if hparams.val_only else hparams.num_epochs,
                               check_val_every_n_epoch=1 if hparams.val_only else hparams.num_epochs,
                               callbacks=callbacks,
                               logger=logger,
@@ -942,8 +898,8 @@ if __name__ == '__main__':
                               devices=hparams.num_gpus,
                               strategy=DDPPlugin(find_unused_parameters=False)
                                        if hparams.num_gpus>1 else None,
-                              # num_sanity_val_steps=-1 if (hparams.val_only or hparams.weight_path) else 0,
-                              num_sanity_val_steps= 0,
+                              num_sanity_val_steps=-1 if (hparams.val_only or hparams.weight_path) else 0,
+                              # num_sanity_val_steps= 0,
                               precision=16)
 
             trainer.fit(system)
@@ -972,6 +928,12 @@ if __name__ == '__main__':
                                 fps=30, macro_block_size=1)
 
     else:
+
+        if hparams.view_select:
+            holdout_imgs = np.delete(full_imgs, start_imgs)
+            addon_choice = np.random.choice(len(holdout_imgs), hparams.N_more, replace=False)
+            hparams.vs_imgs = holdout_imgs[addon_choice]
+
         pytorch_lightning.seed_everything(hparams.seed)
         if hparams.val_only and (not hparams.ckpt_path):
             ckpt_path = f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/epoch={hparams.num_epochs - 1}.ckpt'
@@ -998,7 +960,7 @@ if __name__ == '__main__':
                                    name=hparams.exp_name,
                                    default_hp_metric=False)
 
-        trainer = Trainer(max_epochs=1 if hparams.val_only else hparams.num_epochs,
+        trainer = Trainer(max_epochs=0 if hparams.val_only else hparams.num_epochs,
                           check_val_every_n_epoch=1 if hparams.val_only else hparams.num_epochs,
                           callbacks=callbacks,
                           logger=logger,
@@ -1007,8 +969,8 @@ if __name__ == '__main__':
                           devices=hparams.num_gpus,
                           strategy=DDPPlugin(find_unused_parameters=False)
                           if hparams.num_gpus > 1 else None,
-                          # num_sanity_val_steps=-1 if (hparams.val_only or hparams.weight_path) else 0,
-                          num_sanity_val_steps=0,
+                          num_sanity_val_steps=-1 if (hparams.val_only or hparams.weight_path) else 0,
+                          # num_sanity_val_steps=0,
                           precision=16)
 
         trainer.fit(system)

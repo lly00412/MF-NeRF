@@ -350,6 +350,17 @@ def plot_roc(ROC_dict,fig_name, opt_label='rgb_err',intervals = 10):
     fig.savefig(fig_name)
     plt.close()
 
+def plot_u_hist(sigmas, fig_name, n_bins = 10):
+    plt.figure()
+    plt.rcParams.update({'font.size': 25})
+    plt.hist(sigmas,density=True,bins=n_bins)
+    plt.ylabel("Probability")
+    plt.xlabel("Sigma")
+    fig = plt.gcf()
+    fig.set_size_inches(12, 8)
+    fig.savefig(fig_name)
+    plt.close()
+
 def check_file_duplication(filename):
     name, ext = os.path.splitext(filename)
     filelist = glob.glob(f'{name}*{ext}')

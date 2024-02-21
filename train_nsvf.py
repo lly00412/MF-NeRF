@@ -779,7 +779,7 @@ class NeRFSystem(LightningModule):
             for u_method in self.hparams.u_by:
                 u_scores = torch.stack([x[u_method] for x in outputs])
                 mean_u = all_gather_ddp_if_available(u_scores).mean()
-                self.log(f'test/u_{u_method}', mean_u))
+                self.log(f'test/u_{u_method}', mean_u)
 
 
         if self.hparams.plot_roc:

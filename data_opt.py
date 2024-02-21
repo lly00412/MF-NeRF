@@ -69,12 +69,12 @@ def get_opts():
                         help='whether to save vs uncertainty map')
     parser.add_argument("--train_imgs", type=int, default=None, nargs='+',
                         help='only use training imgs listed here')
+    parser.add_argument("--vs_imgs", type=int, default=None, nargs='+',
+                        help='only validate imgs listed here')
     # parser.add_argument('--n_centers', type=int, default=0,
     #                     help='num of initial centers for nsvf training kmeans')
     parser.add_argument('--N_more', type=int, default=20,
                         help='num of views for add-on trainings')
-    # parser.add_argument("--add_img", type=int, default=None, nargs='+',
-    #                     help='add new training imgs listed here')
 
     # loss options
     parser.add_argument('--loss', type=str, default='l2',
@@ -91,6 +91,8 @@ def get_opts():
                         help='whether to plot roc of all estimation')
     parser.add_argument('--vs_sample_rate', type=float, default=1.,
                         help='percentage of sampling rays per view, 1 means rendering all rays')
+    parser.add_argument('--u_hist', action='store_true', default=False,
+                        help='whether to plot histogram of uncertainty')
 
     # mcdropout settings
     parser.add_argument("--n_passes", type=int, default=30,

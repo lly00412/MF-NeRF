@@ -16,6 +16,13 @@
           </mappings>
         </serverdata>
       </paths>
+      <paths name="viper (6)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/mnt/Data2/liyan/MF-NeRF" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
     </serverData>
   </component>
 </project>
