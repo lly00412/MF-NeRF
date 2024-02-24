@@ -497,10 +497,13 @@ class NeRFSystem(LightningModule):
             q1 = torch.quantile(norm_sigmas, 0.25)
             q3 = torch.quantile(norm_sigmas, 0.75)
             IQR = q3 - q1
-            b_min = q1 - 1.5 * IQR
-            b_max = q3 + 1.5 * IQR
+            b_min = q1 - 2.5 * IQR
+            b_max = q3 + 2.5 * IQR
             mask = (norm_sigmas > b_min) & (norm_sigmas < b_max)
             norm_sigmas = norm_sigmas[mask]
+
+            print(f'cover: {mask.sum()/len(mask)}, b_min: {b_min}, b_max: {b_max}')
+            print(f'u_mean: {norm_sigmas.mean()}')
 
             hist_fig = os.path.join(self.val_dir, f'eval_vs/{img_id:03d}_u_hist.png')
             plot_u_hist(norm_sigmas, hist_fig, n_bins=20)
