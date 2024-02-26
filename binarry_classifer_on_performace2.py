@@ -83,7 +83,10 @@ def create_dataset_on_same_scene(data_file,test_scene='Drums',target='psnr'):
                 f3 = [a-b for a,b in zip(f1,f2)]
                 # f4 = s_df['avg_sigma'].iloc[i] - s_df['avg_sigma'].iloc[j]
                 # f3.append(f4)
-                label = float(scene_df[target].iloc[i]>scene_df[target].iloc[j])
+                label = float(scene_df[target].iloc[i] > scene_df[target].iloc[j])
+                if target == 'lpips':
+                    label = 1 - label
+
                 # x_train.append([f1,f2,f3])
                 X.append(f3)
                 Y.append(label)
@@ -240,6 +243,7 @@ def train(hparams):
     os.makedirs(f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/', exist_ok=True)
     results_file = f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/{hparams.num_epochs:d}.txt'
     with open(results_file, 'a') as f:
+        f.write(f'Scene: {hparams.test_scene}, Metric: {hparams.target} \n')
         f.write(f'Epoch [{epoch + 1}/{epochs}], Loss: {average_loss:.4f}, Accuracy: {accuracy * 100:.2f}% \n')
         f.close()
 

@@ -5,7 +5,7 @@ export BASE_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/nerfvs/
 export CUDA_VISIBLE_DEVICES=0
 
 scenes=(Hotdog Chair Drums Ficus)
-metric=psnr
+metric=lpips
 
 for SCENES in ${scenes[@]}
 do
