@@ -14,7 +14,7 @@ export PREFIX=Synthetic_NeRF/Hash/fewshot11
 #export PREFIX=Synthetic_NeRF/Hash/fewshot11/
 
 #scenes=(Hotdog Chair Drums Ficus)
-scenes=(Chair Drums)
+scenes=(Hotdog Chair Drums Ficus)
 
 for SCENES in ${scenes[@]}
 do

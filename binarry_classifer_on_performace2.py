@@ -166,13 +166,13 @@ class BinarryClassifier(nn.Module):
         if act == 'logSoftmax':
             self.act = nn.LogSoftmax()
 
-        self.fc1 = nn.Linear(indim, 60)  # Fully connected layer 1
+        self.fc1 = nn.Linear(indim, 128)  # Fully connected layer 1
         self.relu = nn.ReLU()  # ReLU activation
-        self.fc2 = nn.Linear(60, 60)  # Fully connected layer 2
-        self.fc3 = nn.Linear(60, 60)
-        self.fc4 = nn.Linear(60, n_classes)
+        self.fc2 = nn.Linear(128, 128)  # Fully connected layer 2
+        self.fc3 = nn.Linear(128, 128)
+        self.fc4 = nn.Linear(128, n_classes)
         # self.fc = nn.Linear(indim,n_classes)
-        self.dropout = nn.Dropout(p=0.5)
+        self.dropout = nn.Dropout(p=0.2)
     def forward(self,x):
         x = self.fc1(x)
         x = self.relu(x)
@@ -191,7 +191,7 @@ def train(hparams):
         device = torch.device('cuda')
     else:
         device = torch.device('cpu')
-    model = BinarryClassifier(indim=10, n_classes=1,act='Sigmoid')
+    model = BinarryClassifier(indim=11, n_classes=1,act='Sigmoid')
     epochs = hparams.num_epochs
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
@@ -237,6 +237,12 @@ def train(hparams):
         accuracy = corrects / total_samples
         print(f'Epoch [{epoch + 1}/{epochs}], Loss: {average_loss:.4f}, Accuracy: {accuracy*100:.2f}%')
 
+    os.makedirs(f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/', exist_ok=True)
+    results_file = f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/{hparams.num_epochs:d}.txt'
+    with open(results_file, 'a') as f:
+        f.write(f'Epoch [{epoch + 1}/{epochs}], Loss: {average_loss:.4f}, Accuracy: {accuracy * 100:.2f}% \n')
+        f.close()
+
     model.eval()
     corrects = 0.0
     total_samples = 0.0
@@ -260,7 +266,9 @@ def train(hparams):
     print(f'Test evaluation, Accuracy: {accuracy * 100:.2f}%, F1: {f1:.4f}')
 
     torch.save(model.state_dict(), f'ckpts/{hparams.dataset_name}/{hparams.exp_name}/{hparams.num_epochs:d}.pth')
-
+    with open(results_file, 'a') as f:
+        f.write(f'Test evaluation, Accuracy: {accuracy * 100:.2f}%, F1: {f1:.4f} \n')
+        f.close()
 
 if __name__ == '__main__':
     start = time.time()

@@ -500,15 +500,19 @@ class NeRFSystem(LightningModule):
             b_min = q1 - 2.5 * IQR
             b_max = q3 + 2.5 * IQR
             mask = (norm_sigmas > b_min) & (norm_sigmas < b_max)
-            norm_sigmas = norm_sigmas[mask]
+            # norm_sigmas = norm_sigmas[mask]
 
-            print(f'cover: {mask.sum()/len(mask)}, b_min: {b_min}, b_max: {b_max}')
-            print(f'u_mean: {norm_sigmas.mean()}')
+            # print(f'cover: {mask.sum()/len(mask)}, b_min: {b_min}, b_max: {b_max}')
+            # print(f'u_mean: {norm_sigmas.mean()}')
 
             hist_fig = os.path.join(self.val_dir, f'eval_vs/{img_id:03d}_u_hist.png')
-            plot_u_hist(norm_sigmas, hist_fig, n_bins=20)
+            plot_u_hist(norm_sigmas[mask], hist_fig, n_bins=20)
 
-            u_hist,_ = torch.histogram(norm_sigmas,10,density=True)
+            u_hist,_ = torch.histogram(norm_sigmas[mask],10,density=False)
+            tails = (norm_sigmas>=b_max)
+            last_bin = tails.sum().to(u_hist)
+            u_hist = torch.cat((u_hist,last_bin.reshape(1)),dim=0)
+
             u_hist = u_hist/u_hist.sum()
 
 
