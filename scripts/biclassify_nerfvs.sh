@@ -5,7 +5,7 @@ export BASE_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/nerfvs/
 export CUDA_VISIBLE_DEVICES=0
 
 scenes=(Hotdog Chair Drums Ficus)
-metric=lpips
+metric=ssim
 
 for SCENES in ${scenes[@]}
 do
@@ -16,7 +16,7 @@ python binarry_classifer_on_performace2.py \
     --dataset_name nerfvs \
     --test_scene ${SCENES} \
     --target ${metric} \
-    --exp_name test_on_${SCENES}_${metric}_v2 \
+    --exp_name test_on_${SCENES}_${metric} \
     --loss bce \
     --num_epochs 1000 --batch_size 64 --lr 1e-4 \
     --seed 79663
