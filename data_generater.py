@@ -867,8 +867,20 @@ if __name__ == '__main__':
     hparams = get_opts()
 
     np.random.seed(hparams.vs_seed)
-    full_imgs = np.arange(100)
+
+    dataset = dataset_dict[hparams.dataset_name]
+    kwargs = {'root_dir': hparams.root_dir,
+              'downsample': hparams.downsample}
+    train_dataset = dataset(split=hparams.split,
+                                 fewshot=0,
+                                 subs=None,
+                                 seed=hparams.vs_seed,
+                                 **kwargs)
+    total_imgs = len(train_dataset.poses)
+    full_imgs = np.arange(total_imgs)
     start_imgs = hparams.train_imgs
+
+    del train_dataset,kwargs,dataset
 
     if hparams.N_more > 0 and not hparams.view_select:
 

@@ -10,7 +10,7 @@ from .rendering import NEAR_DISTANCE
 
 
 class NGP(nn.Module):
-    def __init__(self, scale, hparams, rgb_act='Sigmoid'):
+    def __init__(self, scale, hparams, rgb_act='Sigmoid',uncert_act=None):
         super().__init__()
 
         if not rgb_act == 'None':
