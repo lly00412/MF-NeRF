@@ -178,8 +178,7 @@ class NeRFSystem(LightningModule):
             self.train_dataset.p = p
             self.train_dataset.trained_epochs = trained_epochs
 
-        self.test_dataset = dataset(split='test',
-                                    fewshot=10,**kwargs)
+        self.test_dataset = dataset(split='test',**kwargs)
 
         if self.hparams.view_select:
             self.handout_dataset = dataset(split='train',
@@ -798,6 +797,17 @@ class NeRFSystem(LightningModule):
             lpipss = torch.stack([x['lpips'] for x in outputs])
             mean_lpips = all_gather_ddp_if_available(lpipss).mean()
             self.log('test/lpips_vgg', mean_lpips)
+
+        val_df = pd.DataFrame(columns=['psnr', 'ssim', 'lpips'])
+        val_df.at[0, 'psnr'] =  mean_psnr
+        val_df.at[0, 'ssim'] = mean_ssim
+        if self.hparams.eval_lpips:
+            val_df.at[0, 'lpips'] = mean_lpips
+
+        val_file = os.path.join(self.val_dir, f'scores/eval_scores.csv')
+        print(f'Save to {val_file}')
+        val_df.to_csv(val_file, index=False)
+
 
         if self.hparams.eval_u:
             for u_method in self.hparams.u_by:

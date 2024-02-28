@@ -23,6 +23,27 @@
           </mappings>
         </serverdata>
       </paths>
+      <paths name="viper (7)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/mnt/Data2/liyan/MF-NeRF" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="viper (8)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/mnt/Data2/liyan/MF-NeRF" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="viper (9)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/mnt/Data2/liyan/MF-NeRF" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
     </serverData>
   </component>
 </project>
