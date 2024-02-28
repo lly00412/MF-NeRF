@@ -514,8 +514,6 @@ class NeRFSystem(LightningModule):
 
             u_hist = u_hist/u_hist.sum()
 
-
-
         if not self.hparams.no_save_vs:
             sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
             sigmas = sigmas.squeeze(1)
@@ -798,11 +796,13 @@ class NeRFSystem(LightningModule):
             mean_lpips = all_gather_ddp_if_available(lpipss).mean()
             self.log('test/lpips_vgg', mean_lpips)
 
+        val_csv_path = f'{self.val_dir}/scores'
+        os.makedirs(val_csv_path, exist_ok=True)
         val_df = pd.DataFrame(columns=['psnr', 'ssim', 'lpips'])
-        val_df.at[0, 'psnr'] =  mean_psnr
-        val_df.at[0, 'ssim'] = mean_ssim
+        val_df.at[0, 'psnr'] =  mean_psnr.item()
+        val_df.at[0, 'ssim'] = mean_ssim.item()
         if self.hparams.eval_lpips:
-            val_df.at[0, 'lpips'] = mean_lpips
+            val_df.at[0, 'lpips'] = mean_lpips.item()
 
         val_file = os.path.join(self.val_dir, f'scores/eval_scores.csv')
         print(f'Save to {val_file}')
