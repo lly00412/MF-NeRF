@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 from data_opt import get_opts
 import glob
 import imageio
@@ -490,9 +491,12 @@ class NeRFSystem(LightningModule):
 
         u_hist = None
         if self.hparams.u_hist:
-            norm_sigmas = sigmas.flatten()
-            valid = (norm_sigmas > 0)
-            norm_sigmas = norm_sigmas[valid]
+            filtered_sigmas = sigmas.flatten()
+            valid = (filtered_sigmas > 0)
+            filtered_sigmas = filtered_sigmas[valid]
+            # apply normalization
+            norm_sigmas = F.normalize(filtered_sigmas,dim=0)
+
             q1 = torch.quantile(norm_sigmas, 0.25)
             q3 = torch.quantile(norm_sigmas, 0.75)
             IQR = q3 - q1
@@ -645,19 +649,28 @@ class NeRFSystem(LightningModule):
                 print(f'u_std: {np.nanstd(sigmas.cpu().numpy())}')
 
                 if self.hparams.u_hist:
-                    norm_sigmas = sigmas.flatten()
-                    valid = (norm_sigmas > 0)
-                    norm_sigmas = norm_sigmas[valid]
-                    q1 = torch.quantile(norm_sigmas,0.25)
-                    q3 = torch.quantile(norm_sigmas,0.75)
-                    IQR = q3-q1
-                    b_min = q1 - 1.5*IQR
-                    b_max = q3 + 1.5*IQR
-                    mask = (norm_sigmas>b_min)&(norm_sigmas<b_max)
-                    norm_sigmas = norm_sigmas[mask]
+                    filtered_sigmas = sigmas.flatten()
+                    valid = (filtered_sigmas > 0)
+                    filtered_sigmas = filtered_sigmas[valid]
+                    # apply normalization
+                    norm_sigmas = F.normalize(filtered_sigmas, dim=0)
+
+                    q1 = torch.quantile(norm_sigmas, 0.25)
+                    q3 = torch.quantile(norm_sigmas, 0.75)
+                    IQR = q3 - q1
+                    b_min = q1 - 2.5 * IQR
+                    b_max = q3 + 2.5 * IQR
+                    mask = (norm_sigmas > b_min) & (norm_sigmas < b_max)
 
                     hist_fig = os.path.join(self.val_dir, f'{img_id:03d}_u_hist.png')
-                    plot_u_hist(norm_sigmas,hist_fig,n_bins=20)
+                    plot_u_hist(norm_sigmas, hist_fig, n_bins=20)
+
+                    u_hist, _ = torch.histogram(norm_sigmas[mask], 10, density=False)
+                    tails = (norm_sigmas >= b_max)
+                    last_bin = tails.sum().to(u_hist)
+                    u_hist = torch.cat((u_hist, last_bin.reshape(1)), dim=0)
+                    u_hist = u_hist / u_hist.sum()
+
 
                 if not self.no_save_test:
                     sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
@@ -804,7 +817,7 @@ class NeRFSystem(LightningModule):
         if self.hparams.eval_lpips:
             val_df.at[0, 'lpips'] = mean_lpips.item()
 
-        val_file = os.path.join(self.val_dir, f'scores/eval_scores.csv')
+        val_file = os.path.join(self.val_dir, f'scores/eval_scores2.csv')
         print(f'Save to {val_file}')
         val_df.to_csv(val_file, index=False)
 
@@ -835,7 +848,7 @@ class NeRFSystem(LightningModule):
                 result_df.at[i, 'warp_u'] = view_uncert_scores[i].item()
                 result_df.at[i, 'u_hist'] = u_hists[i].tolist()
 
-            csv_file = os.path.join(self.val_dir, f'eval_vs/vsu_scores.csv')
+            csv_file = os.path.join(self.val_dir, f'eval_vs/vsu_scores2.csv')
             print(f'Save to {csv_file}')
             result_df.to_csv(csv_file, index=False)
 
@@ -892,11 +905,17 @@ if __name__ == '__main__':
 
     del train_dataset,kwargs,dataset
 
-    if hparams.N_more > 0 and not hparams.view_select:
+    if hparams.N_more > 0:
 
         holdout_imgs = np.delete(full_imgs,start_imgs)
+        np.random.seed(hparams.vs_seed)
         addon_choice = np.random.choice(len(holdout_imgs),hparams.N_more,replace=False)
         prefix = hparams.exp_name
+
+        if hparams.view_select:
+            np.random.seed(hparams.vs_seed)
+            vs_choice = np.random.choice(len(holdout_imgs),hparams.VS_more,replace=False)
+            hparams.vs_imgs = holdout_imgs[vs_choice]
 
         for choice in addon_choice:
             hparams.train_imgs = np.append(start_imgs,holdout_imgs[choice])
@@ -970,8 +989,9 @@ if __name__ == '__main__':
 
         if hparams.view_select:
             holdout_imgs = np.delete(full_imgs, start_imgs)
-            addon_choice = np.random.choice(len(holdout_imgs), hparams.N_more, replace=False)
-            hparams.vs_imgs = holdout_imgs[addon_choice]
+            np.random.seed(hparams.vs_seed)
+            vs_choice = np.random.choice(len(holdout_imgs), hparams.VS_more, replace=False)
+            hparams.vs_imgs = holdout_imgs[vs_choice]
 
         pytorch_lightning.seed_everything(hparams.seed)
         if hparams.val_only and (not hparams.ckpt_path):

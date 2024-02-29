@@ -75,6 +75,8 @@ def get_opts():
     #                     help='num of initial centers for nsvf training kmeans')
     parser.add_argument('--N_more', type=int, default=20,
                         help='num of views for add-on trainings')
+    parser.add_argument('--VS_more', type=int, default=20,
+                        help='num of views for view selection')
 
     # loss options
     parser.add_argument('--loss', type=str, default='l2',
