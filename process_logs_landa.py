@@ -14,6 +14,8 @@ def get_opts():
                         help='method name')
     parser.add_argument('--N_vs', type=int, default=1,
                         help='how many steps')
+    parser.add_argument('--version', type=int, default=0,
+                        help='which run version')
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -21,16 +23,16 @@ if __name__ == '__main__':
     for scene in args.scenes:
         print(scene)
         if not args.method==None:
-            log_path = os.path.join(args.log_dir,scene,args.method,'*/version_*/events.*')
+            log_path = os.path.join(args.log_dir,scene,args.method,f'*/version_{args.version}/events.*')
             logs = sorted(glob.glob(log_path))
         else:
-            log_path = os.path.join(args.log_dir, scene,'version_*/events.*')
+            log_path = os.path.join(args.log_dir, scene,f'version_{args.version}/events.*')
             logs = sorted(glob.glob(log_path))
         result_df = pd.DataFrame()
         labels = ['22','24','26','28']
         evals = ['lpips_vgg','psnr','ssim']
         N_vs = args.N_vs
-        for i in range(1, args.N_vs):
+        for i in range(0, args.N_vs):
             acc = EventAccumulator(logs[i])
             acc.Reload()
             for eval in evals:
