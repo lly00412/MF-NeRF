@@ -509,9 +509,9 @@ class NeRFSystem(LightningModule):
             # print(f'u_mean: {norm_sigmas.mean()}')
 
             hist_fig = os.path.join(self.val_dir, f'eval_vs/{img_id:03d}_u_hist.png')
-            plot_u_hist(norm_sigmas[mask], hist_fig, n_bins=20)
+            plot_u_hist(norm_sigmas[mask], hist_fig, n_bins=self.hparams.u_bins)
 
-            u_hist,_ = torch.histogram(norm_sigmas[mask],10,density=False)
+            u_hist,_ = torch.histogram(norm_sigmas[mask],self.hparams.u_bins,density=False)
             tails = (norm_sigmas>=b_max)
             last_bin = tails.sum().to(u_hist)
             u_hist = torch.cat((u_hist,last_bin.reshape(1)),dim=0)
@@ -663,9 +663,9 @@ class NeRFSystem(LightningModule):
                     mask = (norm_sigmas > b_min) & (norm_sigmas < b_max)
 
                     hist_fig = os.path.join(self.val_dir, f'{img_id:03d}_u_hist.png')
-                    plot_u_hist(norm_sigmas, hist_fig, n_bins=20)
+                    plot_u_hist(norm_sigmas, hist_fig, n_bins=self.hparams.u_bins)
 
-                    u_hist, _ = torch.histogram(norm_sigmas[mask], 10, density=False)
+                    u_hist, _ = torch.histogram(norm_sigmas[mask], self.hparams.u_bins, density=False)
                     tails = (norm_sigmas >= b_max)
                     last_bin = tails.sum().to(u_hist)
                     u_hist = torch.cat((u_hist, last_bin.reshape(1)), dim=0)
@@ -848,7 +848,7 @@ class NeRFSystem(LightningModule):
                 result_df.at[i, 'warp_u'] = view_uncert_scores[i].item()
                 result_df.at[i, 'u_hist'] = u_hists[i].tolist()
 
-            csv_file = os.path.join(self.val_dir, f'eval_vs/vsu_scores2.csv')
+            csv_file = os.path.join(self.val_dir, f'eval_vs/vsu_scores3.csv')
             print(f'Save to {csv_file}')
             result_df.to_csv(csv_file, index=False)
 

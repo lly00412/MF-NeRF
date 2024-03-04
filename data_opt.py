@@ -95,6 +95,8 @@ def get_opts():
                         help='percentage of sampling rays per view, 1 means rendering all rays')
     parser.add_argument('--u_hist', action='store_true', default=False,
                         help='whether to plot histogram of uncertainty')
+    parser.add_argument('--u_bins',  type=int, default=20,
+                        help='num of bins for u hist')
 
     # mcdropout settings
     parser.add_argument("--n_passes", type=int, default=30,
