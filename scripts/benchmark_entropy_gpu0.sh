@@ -51,7 +51,7 @@ done
 ######### dense llff entropy
 
 export BASE_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/nerf_llff/Hash/res0.25/fewshot10/
-
+export PREFIX=nerf_llff/Hash/fewshot15
 scenes=(room horns trex fortress)
 
 for SCENES in ${scenes[@]}
