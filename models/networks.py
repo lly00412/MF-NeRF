@@ -13,7 +13,8 @@ class NGP(nn.Module):
     def __init__(self, scale, hparams, rgb_act='Sigmoid'):
         super().__init__()
 
-        self.rgb_act = rgb_act
+        if not rgb_act == 'None':
+            self.rgb_act = nn.Sigmoid()
 
         # scene bounding box
         self.scale = scale
@@ -66,17 +67,34 @@ class NGP(nn.Module):
                 },
             )
 
-        self.rgb_net = \
+        self.rgb_mlp = \
             tcnn.Network(
-                n_input_dims=32, n_output_dims=3,
+                n_input_dims=32, n_output_dims=128,
                 network_config={
                     "otype": "FullyFusedMLP",
                     "activation": "ReLU",
-                    "output_activation": self.rgb_act,
+                    "output_activation": "ReLU",
                     "n_neurons": hparams.rgb_channels,
-                    "n_hidden_layers": hparams.rgb_layers,
+                    "n_hidden_layers": hparams.rgb_layers-1,
                 }
             )
+
+        # self.rgb_net = torch.nn.Sequential(
+        #     nn.Linear(32, 128,bias=False),
+        #     nn.ReLU(),
+        #     nn.Linear(128, 128,bias=False),
+        #     nn.ReLU(),
+        #     nn.Linear(128, 128,bias=False),
+        #     nn.ReLU(),
+        #     nn.Dropout(p=0),
+        #     nn.Linear(128, 3,bias=False),
+        # )
+        self.dropout = nn.Dropout(p=0)
+        self.rgb_net = torch.nn.Sequential(
+            self.rgb_mlp,
+            self.dropout,
+            nn.Linear(128, 3,bias=False),
+        )
 
         if self.rgb_act == 'None': # rgb_net output is log-radiance
             for i in range(3): # independent tonemappers for r,g,b
@@ -104,6 +122,7 @@ class NGP(nn.Module):
         """
         x = (x-self.xyz_min)/(self.xyz_max-self.xyz_min)
         h = self.xyz_encoder(x)
+        h = self.dropout(h)
         sigmas = TruncExp.apply(h[:, 0])
         if return_feat: return sigmas, h
         return sigmas
@@ -145,6 +164,8 @@ class NGP(nn.Module):
         d = d/torch.norm(d, dim=1, keepdim=True)
         d = self.dir_encoder((d+1)/2)
         rgbs = self.rgb_net(torch.cat([d, h], 1))
+        # rgbs = self.rgb_out(rgbs)
+        rgbs = self.rgb_act(rgbs)
 
         if self.rgb_act == 'None': # rgbs is log-radiance
             if kwargs.get('output_radiance', False): # output HDR map
@@ -186,7 +207,9 @@ class NGP(nn.Module):
             indices1 = vren.morton3D(coords1).long()
             # occupied cells
             indices2 = torch.nonzero(self.density_grid[c]>density_threshold)[:, 0]
-            if len(indices2)>0:
+            if len(indices2)==0:
+                return None
+            elif len(indices2)>0:
                 rand_idx = torch.randint(len(indices2), (M,),
                                          device=self.density_grid.device)
                 indices2 = indices2[rand_idx]
@@ -247,6 +270,8 @@ class NGP(nn.Module):
         else:
             cells = self.sample_uniform_and_occupied_cells(self.grid_size**3//4,
                                                            density_threshold)
+            if cells==None:
+                cells = self.get_all_cells()
         # infer sigmas
         for c in range(self.cascades):
             indices, coords = cells[c]

@@ -32,10 +32,11 @@ def get_opts():
     parser.add_argument('--batch_size', type=int, default=8192,
                         help='number of rays in a batch')
     parser.add_argument('--ray_sampling_strategy', type=str, default='all_images',
-                        choices=['all_images', 'same_image'],
+                        choices=['all_images', 'same_image','weighted_images'],
                         help='''
                         all_images: uniformly from all pixels of ALL images
                         same_image: uniformly from all pixels of a SAME image
+                        more_new_images: select new images with higher probability and uniformly select pixels of each image
                         ''')
     parser.add_argument('--num_epochs', type=int, default=30,
                         help='number of training epochs')
@@ -51,19 +52,59 @@ def get_opts():
                         help='''whether to train with random bg color (real scene only)
                         to avoid objects with black color to be predicted as transparent
                         ''')
-    parser.add_argument("--fewshot_seed", type=int, default=340,
-                        help='fewshot_seed')
-    parser.add_argument("--fewshot", type=int, default=0,
-                        help='if 0 not using fewshot, else: using fewshot')
+
+    # active learning view selection
+    parser.add_argument('--view_select', action='store_true', default=False,
+                        help='whether run view selection process')
+    parser.add_argument("--vs_seed", type=int, default=349,
+                        help='random seed to initialize the training set')
+    parser.add_argument("--start", type=int, default=10,
+                        help='size of initial trainset, if start=0 means use the full trainset')
+    parser.add_argument("--pre_train_epoch", type=int, default=10,
+                        help='num of pretrain epoch for the starting point')
+    parser.add_argument("--N_vs", type=int, default=4,
+                        help='run view selection process for N times')
+    parser.add_argument("--view_step", type=int, default=5,
+                        help='num of views add to trainset each time')
+    parser.add_argument("--epoch_step", type=int, default=5,
+                        help='num of epochs between each selection')
+    parser.add_argument('--vs_sample_rate', type=float, default=1.,
+                        help='percentage of sampling rays per view, 1 means rendering all rays')
+    parser.add_argument('--vs_batch_size', type=int, default=1024,
+                        help='number of rays processing a batch for view selection')
+    parser.add_argument('--vs_by', type=str, default=None,
+                        choices=[None, 'random', 'warp', 'mcd_d', 'mcd_r', 'entropy'],
+                        help='select supplemental views by random / warping uncertainty / mcdropout depth / mcdropout rgb')
+    parser.add_argument('--no_save_vs', action='store_true', default=False,
+                        help='whether to save vs uncertainty map')
+    parser.add_argument("--train_img", type=int, default=None, nargs='+',
+                        help='only use training imgs listed here')
+    parser.add_argument('--n_centers', type=int, default=0,
+                        help='num of initial centers for nsvf training kmeans')
 
     # loss options
     parser.add_argument('--loss', type=str, default='l2',
                         choices=['l2', 'nll', 'nllc'],
                         help='which loss to train: l2, nagtive loglikihood, nagtive loglikelihood + consistency (by SEDNet)')
-    parser.add_argument('--uncert', action='store_true', default=False,
-                        help='whether to estimate uncertainty')
-    parser.add_argument('--warp', action='store_true', default=False,
-                        help='whether to warp depth from camera 0 to other val cameras')
+
+    # uncert option
+    parser.add_argument('--eval_u', action='store_true', default=False,
+                        help='whether to compute uncertainty')
+    parser.add_argument('--u_by', type=str, default=None, nargs='+',
+                        choices=[None, 'warp', 'mcd_d', 'mcd_r','entropy'],
+                        help='estimate uncertainty by warping / mcdropout depth / mcdropout rgb/ entropy')
+    parser.add_argument('--plot_roc', action='store_true', default=False,
+                        help='whether to plot roc of all estimation')
+
+    # mcdropout settings
+    parser.add_argument("--n_passes", type=int, default=30,
+                        help='number of passes for mc_dropout')
+    parser.add_argument("--p", type=float, default=0.2,
+                        help='drop prob for mc_dropout')
+
+    # warp settings
+    parser.add_argument("--theta", type=int, default=1,
+                        help='number of passes for mc_dropout')
 
 
     # validation options
@@ -78,13 +119,6 @@ def get_opts():
     parser.add_argument('--save_video', action='store_true', default=False,
                         help='save the render video')
 
-    # mcdropout
-    parser.add_argument("--mcdropout", action='store_true',
-                        help='if do mc_dropout')
-    parser.add_argument("--n_passes", type=int, default=10,
-                        help='number of passes for mc_dropout')
-    parser.add_argument("--p", type=float, default=0.5,
-                        help='drop prob for mc_dropout')
 
     # misc
     parser.add_argument('--exp_name', type=str, default='exp',
@@ -93,6 +127,7 @@ def get_opts():
                         help='pretrained checkpoint to load (including optimizers, etc)')
     parser.add_argument('--weight_path', type=str, default=None,
                         help='pretrained checkpoint to load (excluding optimizers, etc)')
+
 
     # network config
     parser.add_argument('--grid', type=str, default='Hash',

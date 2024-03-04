@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" remoteFilesAllowedToDisappearOnAutoupload="false">
+  <component name="PublishConfigData" serverName="landa" remoteFilesAllowedToDisappearOnAutoupload="false">
     <serverData>
+      <paths name="landa">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/lchen39/projects/MF-NeRF" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="viper">
         <serverdata>
           <mappings>

@@ -4,6 +4,7 @@ from .custom_functions import \
 from einops import rearrange
 import vren
 
+# MAX_SAMPLES = 1024
 MAX_SAMPLES = 1024
 NEAR_DISTANCE = 0.01
 
@@ -29,7 +30,10 @@ def render(model, rays_o, rays_d, **kwargs):
     hits_t[(hits_t[:, 0, 0]>=0)&(hits_t[:, 0, 0]<NEAR_DISTANCE), 0, 0] = NEAR_DISTANCE
 
     if kwargs.get('test_time', False):
-        render_func = __render_rays_test
+        if kwargs.get('sparse',False):
+            render_func = __render_rays_test_sparse
+        else:
+            render_func = __render_rays_test
     else:
         render_func = __render_rays_train
 
@@ -41,6 +45,7 @@ def render(model, rays_o, rays_d, **kwargs):
                 v = v.numpy()
         results[k] = v
     return results
+
 
 
 @torch.no_grad()
@@ -65,6 +70,8 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
     opacity = torch.zeros(N_rays, device=device)
     depth = torch.zeros(N_rays, device=device)
     rgb = torch.zeros(N_rays, 3, device=device)
+    if kwargs.get('entropy', False):
+        entropy = torch.zeros(N_rays, device=device)
 
     samples = total_samples = 0
     alive_indices = torch.arange(N_rays, device=device)
@@ -92,18 +99,46 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
         if valid_mask.sum()==0: break
 
         sigmas = torch.zeros(len(xyzs), device=device)
-        rgbs = torch.zeros(len(xyzs), 3, device=device)
-        sigmas[valid_mask], _rgbs = model(xyzs[valid_mask], dirs[valid_mask], **kwargs)
-        rgbs[valid_mask] = _rgbs.float()
+        rgbs = torch.zeros(len(xyzs), 3, device=device).float()
+
+        ################# TO SOLVE THE MEMORY PROBLEM #################
+        N_trunks = 8
+        valid_mask = list(torch.chunk(valid_mask, chunks=N_trunks))
+        xyzs = list(torch.chunk(xyzs, chunks=N_trunks))
+        dirs = list(torch.chunk(dirs, chunks=N_trunks))
+        sigmas = list(torch.chunk(sigmas, chunks=N_trunks))
+        rgbs = list(torch.chunk(rgbs, chunks=N_trunks))
+
+        for t_idx in range(N_trunks):
+            if valid_mask[t_idx].sum()<1:
+                continue
+            sigmas[t_idx][valid_mask[t_idx]], _rgbs = model(xyzs[t_idx][valid_mask[t_idx]],
+                                                            dirs[t_idx][valid_mask[t_idx]], **kwargs)
+            rgbs[t_idx][valid_mask[t_idx]] = _rgbs.float()
+
+        #############################################################
+        sigmas = torch.cat(sigmas)
+        rgbs = torch.cat(rgbs)
+
+        # sigmas[valid_mask], _rgbs = model(xyzs[valid_mask], dirs[valid_mask], **kwargs)
+        # rgbs[valid_mask] = _rgbs.float()
         sigmas = rearrange(sigmas, '(n1 n2) -> n1 n2', n2=N_samples)
         rgbs = rearrange(rgbs, '(n1 n2) c -> n1 n2 c', n2=N_samples)
 
-        vren.composite_test_fw(
-            sigmas, rgbs, deltas, ts,
-            hits_t[:, 0], alive_indices, kwargs.get('T_threshold', 1e-4),
-            N_eff_samples, opacity, depth, rgb)
+        if kwargs.get('entropy', False):
+            vren.composite_test_with_entropy_fw(
+                sigmas, rgbs, deltas, ts,
+                hits_t[:, 0], alive_indices, kwargs.get('T_threshold', 1e-4),
+                N_eff_samples, opacity, depth, entropy, rgb)
+        else:
+            vren.composite_test_fw(
+                sigmas, rgbs, deltas, ts,
+                hits_t[:, 0], alive_indices, kwargs.get('T_threshold', 1e-4),
+                N_eff_samples, opacity, depth, rgb)
         alive_indices = alive_indices[alive_indices>=0] # remove converged rays
 
+    if kwargs.get('entropy', False):
+        results['entropy'] = entropy
     results['opacity'] = opacity
     results['depth'] = depth
     results['rgb'] = rgb
@@ -116,6 +151,65 @@ def __render_rays_test(model, rays_o, rays_d, hits_t, **kwargs):
     results['rgb'] += rgb_bg*rearrange(1-opacity, 'n -> n 1')
 
     return results
+
+
+@torch.no_grad()
+def __render_rays_test_sparse(model, rays_o, rays_d, hits_t, **kwargs):
+    """
+    Render rays by
+    1. March the rays along their directions, querying @density_bitfield
+       to skip empty space, and get the effective sample points (where
+       there is object)
+    2. Infer the NN at these positions and view directions to get properties
+       (currently sigmas and rgbs)
+    3. Use volume rendering to combine the result (front to back compositing
+       and early stop the ray if its transmittance is below a threshold)
+    """
+    exp_step_factor = kwargs.get('exp_step_factor', 0.)
+    results = {}
+
+    (rays_a, xyzs, dirs,
+    results['deltas'], results['ts'], results['rm_samples']) = \
+        RayMarcher.apply(
+            rays_o, rays_d, hits_t[:, 0], model.density_bitfield,
+            model.cascades, model.scale,
+            exp_step_factor, model.grid_size, MAX_SAMPLES)
+
+    for k, v in kwargs.items(): # supply additional inputs, repeated per ray
+        if isinstance(v, torch.Tensor):
+            kwargs[k] = torch.repeat_interleave(v[rays_a[:, 0]], rays_a[:, 2], 0)
+    sigmas, rgbs = model(xyzs, dirs, **kwargs)
+
+    sigmas = sigmas.to(torch.float32)
+    rgbs = rgbs.contiguous().to(torch.float32)
+    results['deltas'] = results['deltas'].to(torch.float32)
+    results['ts'] = results['ts'].to(torch.float32)
+    T_threshold = kwargs.get('T_threshold', 1e-4)
+
+
+    if kwargs.get('entropy', False):
+        (_, results['opacity'],
+         results['depth'],results['entropy'], results['rgb'], results['ws']) = \
+            vren.composite_train_with_entropy_fw(sigmas, rgbs, results['deltas'], results['ts'],
+                                    rays_a, T_threshold)
+    else:
+        (_, results['opacity'],
+        results['depth'], results['rgb'], results['ws']) = \
+            vren.composite_train_fw(sigmas, rgbs, results['deltas'], results['ts'],
+                                 rays_a, T_threshold)
+
+    if exp_step_factor==0: # synthetic
+        rgb_bg = torch.ones(3, device=rays_o.device)
+    else: # real
+        if kwargs.get('random_bg', False):
+            rgb_bg = torch.rand(3, device=rays_o.device)
+        else:
+            rgb_bg = torch.zeros(3, device=rays_o.device)
+    results['rgb'] = results['rgb'] + \
+                     rgb_bg*rearrange(1-results['opacity'], 'n -> n 1')
+
+    return results
+
 
 
 def __render_rays_train(model, rays_o, rays_d, hits_t, **kwargs):

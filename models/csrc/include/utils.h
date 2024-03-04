@@ -73,6 +73,15 @@ std::vector<torch::Tensor> composite_train_fw_cu(
     const float T_threshold
 );
 
+std::vector<torch::Tensor> composite_train_with_entropy_fw_cu(
+    const torch::Tensor sigmas,
+    const torch::Tensor rgbs,
+    const torch::Tensor deltas,
+    const torch::Tensor ts,
+    const torch::Tensor rays_a,
+    const float T_threshold
+);
+
 
 std::vector<torch::Tensor> composite_train_bw_cu(
     const torch::Tensor dL_dopacity,
@@ -144,6 +153,21 @@ void composite_test_fw_cu(
     const torch::Tensor N_eff_samples,
     torch::Tensor opacity,
     torch::Tensor depth,
+    torch::Tensor rgb
+);
+
+void composite_test_with_entropy_fw_cu(
+    const torch::Tensor sigmas,
+    const torch::Tensor rgbs,
+    const torch::Tensor deltas,
+    const torch::Tensor ts,
+    const torch::Tensor hits_t,
+    const torch::Tensor alive_indices,
+    const float T_threshold,
+    const torch::Tensor N_eff_samples,
+    torch::Tensor opacity,
+    torch::Tensor depth,
+    torch::Tensor entropy,
     torch::Tensor rgb
 );
 

@@ -13,10 +13,11 @@ from .base import BaseDataset
 
 
 class ColmapDataset(BaseDataset):
-    def __init__(self, root_dir, split='train', downsample=1.0, fewshot=0,fewshot_seed=340,**kwargs):
-        super().__init__(root_dir, split, downsample,fewshot,fewshot_seed)
+    def __init__(self, root_dir, split='train', downsample=1.0, fewshot=0,fewshot_seed=340,subs=None,**kwargs):
+        super().__init__(root_dir, split, downsample,fewshot,fewshot_seed,subs)
         self.fewshot = fewshot
         self.seed = fewshot_seed
+        self.subs = subs
 
         self.read_intrinsics()
 
@@ -52,13 +53,24 @@ class ColmapDataset(BaseDataset):
         imdata = read_images_binary(os.path.join(self.root_dir, 'sparse/0/images.bin'))
         img_names = [imdata[k].name for k in imdata]
         perm = np.argsort(img_names)
+
         if '360_v2' in self.root_dir and self.downsample<1: # mipnerf360 data
             folder = f'images_{int(1/self.downsample)}'
         else:
             folder = 'images'
         # read successfully reconstructed images and ignore others
+        if 'llff' in self.root_dir and self.downsample<1: # only has 4,8,16, downsample should be 0.25,0.125,0.0625
+            folder = f'images_{int(1/self.downsample)}'
+        else:
+            folder = 'images'
+
         img_paths = [os.path.join(self.root_dir, folder, name)
                      for name in sorted(img_names)]
+
+        # if 'llff' in self.root_dir:
+        #     if self.downsample==0.25 or self.downsample==0.125:
+        #         img_paths = [os.path.splitext(img_path)[0]+'.png' for img_path in img_paths]
+
         self.N_vocab = len(img_paths)
         w2c_mats = []
         bottom = np.array([[0, 0, 0, 1.]])
@@ -72,11 +84,17 @@ class ColmapDataset(BaseDataset):
         pts3d = read_points3d_binary(os.path.join(self.root_dir, 'sparse/0/points3D.bin'))
         pts3d = np.array([pts3d[k].xyz for k in pts3d]) # (N, 3)
 
-        self.poses, self.pts3d = center_poses(poses, pts3d)
+        # replace by https://github.com/Kai-46/nerfplusplus/blob/master/colmap_runner/normalize_cam_dict.py
+        self.raw_poses = poses
+        self.raw_pts3d = pts3d
 
-        scale = np.linalg.norm(self.poses[..., 3], axis=-1).min()
-        self.poses[..., 3] /= scale
-        self.pts3d /= scale
+        self.poses, self.pts3d = normalize_cams(poses,pts3d)
+        # self.poses, self.pts3d = center_poses(poses, pts3d)
+        #
+        # scale = np.linalg.norm(self.poses[..., 3], axis=-1).min()
+        # self.poses[..., 3] /= scale
+        # self.pts3d /= scale
+        # self.scale = scale
 
         self.rays = []
         if split == 'test_traj': # use precomputed test poses
@@ -126,13 +144,24 @@ class ColmapDataset(BaseDataset):
                 img_paths = [x for i, x in enumerate(img_paths) if i%8==0]
                 self.poses = np.array([x for i, x in enumerate(self.poses) if i%8==0])
 
-        if self.fewshot>0:
-            np.random.seed(self.seed)
-            subs = np.random.choice(len(img_paths), self.fewshot)
-            img_paths = np.array(img_paths)[subs]
-            self.poses = self.poses[subs]
+        if split=='train':
+            if self.subs is not None:
+                self.full = len(img_paths)
+                img_paths = np.array(img_paths)[self.subs]
+                self.poses = self.poses[self.subs]
+                self.raw_poses = self.raw_poses[self.subs]
+
+            elif self.fewshot>0:
+                np.random.seed(self.seed)
+                self.full = len(img_paths)
+                self.subs = np.random.choice(len(img_paths), self.fewshot, replace=False)
+                img_paths = np.array(img_paths)[self.subs]
+                self.poses = self.poses[self.subs]
+                self.raw_poses = self.raw_poses[self.subs]
 
         print(f'Loading {len(img_paths)} {split} images ...')
+        if split=='train':
+            print(f'Training imgs are {self.subs}.')
 
         for img_path in tqdm(img_paths):
             buf = [] # buffer for ray attributes: rgb, etc

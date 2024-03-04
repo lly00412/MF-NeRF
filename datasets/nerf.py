@@ -11,10 +11,11 @@ from .base import BaseDataset
 
 
 class NeRFDataset(BaseDataset):
-    def __init__(self, root_dir, split='train', downsample=1.0, fewshot=0,fewshot_seed=340,**kwargs):
+    def __init__(self, root_dir, split='train', downsample=1.0, fewshot=0,fewshot_seed=340,subs=None,**kwargs):
         super().__init__(root_dir, split, downsample,fewshot,fewshot_seed)
         self.fewshot = fewshot
         self.seed = fewshot_seed
+        self.subs = subs
 
         self.read_intrinsics()
         self.N_vocab = 100
@@ -54,6 +55,15 @@ class NeRFDataset(BaseDataset):
             np.random.seed(self.seed)
             subs = np.random.choice(len(frames), self.fewshot)
             frames = np.array(frames)[subs]
+
+        self.full = len(frames)
+        if split=='train':
+            if self.subs is not None:
+                frames = np.array(frames)[self.subs]
+            elif self.fewshot>0:
+                np.random.seed(self.seed)
+                self.subs = np.random.choice(len(frames), self.fewshot, replace=False)
+                frames = np.array(frames)[self.subs]
 
         print(f'Loading {len(frames)} {split} images ...')
         for frame in tqdm(frames):

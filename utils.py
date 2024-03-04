@@ -173,7 +173,6 @@ def warp_tgt_to_ref_sparse(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, 
     if len(depth_map)> len(pixl_ids):
         depth_map = depth_map[pixl_ids]
 
-
     height, width = img_shape
     n_rays = depth_map.shape[0]
 
