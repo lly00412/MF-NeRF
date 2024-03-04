@@ -5,7 +5,7 @@ from einops import rearrange
 import vren
 
 # MAX_SAMPLES = 1024
-MAX_SAMPLES = 4096
+MAX_SAMPLES = 1024
 NEAR_DISTANCE = 0.01
 
 

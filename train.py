@@ -52,8 +52,11 @@ def err2img(err,flip=False):
         err = 1 - (err / np.quantile(err, 0.9))*0.8
     else:
         err = (err / np.quantile(err, 0.9))*0.8
-    err_img = cv2.applyColorMap((err*255).astype(np.uint8),
-                                  cv2.COLORMAP_JET)
+    # err_img = cv2.applyColorMap((err*255).astype(np.uint8),
+    #                               cv2.COLORMAP_JET)
+    err_img = cv2.applyColorMap((err * 255).astype(np.uint8),
+                                cv2.COLORMAP_HOT)
+    err_img = cv2.cvtColor(err_img, cv2.COLOR_BGR2RGB)
     return err_img
 
 def u2img(err,flip=False):
@@ -151,8 +154,6 @@ class NeRFSystem(LightningModule):
 
         return render(self.model, rays_o, rays_d, **kwargs)
 
-
-
     def setup(self, stage):
         dataset = dataset_dict[self.hparams.dataset_name]
         kwargs = {'root_dir': self.hparams.root_dir,
@@ -160,27 +161,66 @@ class NeRFSystem(LightningModule):
 
         self.train_dataset = dataset(split=self.hparams.split,
                                      fewshot=self.hparams.start,
+                                     subs=self.hparams.train_img,
                                      seed=self.hparams.vs_seed,
                                      **kwargs)
-        if self.hparams.start>0:
+        if self.hparams.start > 0:
             with open(self.vs_log, 'a') as f:
-                f.write(f'Initial train img: {self.hparams.start}\n')
-                f.write(f'Initial train ids: {self.train_dataset.subs}\n')
+                f.write(f'Num of train img: {len(self.train_dataset.subs)}\n')
+                f.write(f'Current train ids: {self.train_dataset.subs}\n')
                 f.close()
-
-        self.current_vs = 0
 
         full_train = self.train_dataset.full
         current_train_list = self.train_dataset.subs
         self.handout_list = np.delete(np.arange(full_train), current_train_list)
 
-        if self.hparams.view_select and self.hparams.vs_by==None:
-            while self.current_vs<self.hparams.N_vs:
+        # clustering the cams and selected from the cams
+        self.handout_dataset = dataset(split='train',
+                                       subs=self.handout_list,
+                                       seed=self.hparams.vs_seed,
+                                       **kwargs)
+        self.handout_dataset.split = 'test'
+        if self.hparams.n_centers > 0:
+            centriods = self.handout_dataset.cam_centers.astype(np.float32)
+            centriods = centriods.squeeze(-1)
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+            cv2.setRNGSeed(self.hparams.vs_seed)
+            flags = cv2.KMEANS_RANDOM_CENTERS
+            _, cam_labels, cluster_centers = cv2.kmeans(centriods, self.hparams.n_centers, None, criteria, 10, flags)
+            # cam_labels, cluster_centers = get_cams_cluster(self.handout_dataset.cam_centers,
+            #                                                 n_clusters=20,
+            #                                                 seed=self.hparams.vs_seed)
+            self.handout_dataset.cluster_centers = cluster_centers
+            cam_labels = cam_labels.squeeze(-1)
+            orders = np.zeros(len(cam_labels))
+            for i in range(self.hparams.n_centers):
+                if cam_labels[cam_labels == i].size > 0:
+                    dist2centers = (centriods[cam_labels == i] - cluster_centers[i]) ** 2
+                    dist2centers = dist2centers.sum(-1)
+                    orders[cam_labels == i] = dist2centers.argsort()
+        else:
+            cam_labels = np.arange(len(self.handout_dataset.subs))
+            orders = np.zeros(len(self.handout_dataset.subs))
+            self.hparams.n_centers = len(self.handout_dataset.subs)
+        self.handout_dataset.cam_labels = cam_labels
+        self.handout_dataset.pop_orders = orders.astype(np.int32)
+        # print(cam_labels)
+        # print(orders)
+
+        if self.hparams.view_select and self.hparams.vs_by == None:
+            current_vs = 0
+            while current_vs < self.hparams.N_vs:
                 np.random.seed(self.hparams.vs_seed)
-                choice = np.random.choice(len(self.handout_list), self.hparams.view_step, replace=False)
-                current_train_list = np.append(current_train_list, self.handout_list[choice])
-                self.handout_list = np.delete(self.handout_list, choice)
-                self.current_vs += 1
+                candidates = []
+                for i in range(self.hparams.n_centers):
+                    cls_cams = np.where(self.handout_dataset.cam_labels == i)
+                    if cls_cams.size > 0:
+                        nearest_cam = self.handout_dataset.pop_orders[cls_cams].argmin()
+                        candidates.append(self.handout_list[cls_cams][nearest_cam])
+                choice = np.random.choice(len(candidates), self.hparams.view_step, replace=False)
+                current_train_list = np.append(current_train_list, candidates[choice])
+                self.handout_list = np.delete(np.arange(self.train_dataset.full), current_train_list)
+                current_vs += 1
 
             self.train_dataset = dataset(split=self.hparams.split,
                                          subs=current_train_list,
@@ -192,23 +232,17 @@ class NeRFSystem(LightningModule):
                 f.write(f'Train img ids: {current_train_list}\n')
                 f.close()
 
+            self.hparams.view_select = False
+
             # self.hparams.N_vocab = self.train_dataset.N_vocab + self.test_dataset.N_vocab
 
         self.train_dataset.batch_size = self.hparams.batch_size
         self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
-        if self.hparams.ray_sampling_strategy == "more_new_images":
-            N_train = len(self.train_dataset.subs)
-            p = np.ones(N_train)
-            trained_epochs = [self.hparams.pre_train_epoch]*self.hparams.start + [0]*(N_train-self.hparams.start)
-            trained_epochs = np.array(trained_epochs)+self.hparams.epoch_step
-            p /= trained_epochs
-            p /= p.sum()
-            self.train_dataset.p = p
-            self.train_dataset.trained_epochs = trained_epochs
-
-
-
         self.test_dataset = dataset(split='test', **kwargs)
+
+        if self.train_dataset.ray_sampling_strategy == "weighted_images":
+            self.reweighted_samples = True
+
 
     def configure_optimizers(self):
         # define additional parameters
@@ -359,13 +393,13 @@ class NeRFSystem(LightningModule):
         del all_results
         return results
 
-    def warp_uncert(self, batch, results, img_h, img_w, K, isdense=True):
+    def warp_uncert(self, batch, results, img_h, img_w, K, theta, isdense=True):
         opacity = results['opacity'].cpu()  # (n_rays)
         if self.hparams.vs_sample_rate < 1:
             pix_idxs = results['pix_idxs']
         else:
             pix_idxs = torch.arange(img_h * img_w)
-        if len(opacity)>len(pix_idxs):
+        if len(opacity) > len(pix_idxs):
             opacity = opacity[pix_idxs]
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -380,7 +414,7 @@ class NeRFSystem(LightningModule):
                  'img_w': img_w}
 
         Vcam = GetVirtualCam(vargs)
-        thetas = [self.hparams.theta, -self.hparams.theta, self.hparams.theta, -self.hparams.theta]
+        thetas = [theta, -theta, theta, -theta]
         rot_ax = ['x', 'x', 'y', 'y']
         warp_depths = [vargs['ref_depth_map'][pix_idxs].cpu()]
         counts = 0
@@ -566,7 +600,6 @@ class NeRFSystem(LightningModule):
             ROC_dict = {}
             AUC_dict = {}
             u_dict = {}
-            counts_dict = {}
             common_counts = 0
             img_w, img_h = self.test_dataset.img_wh
             # results['pix_idxs'] = None
@@ -593,7 +626,7 @@ class NeRFSystem(LightningModule):
                     #                                            img_h, img_w, K, theta,
                     #                                            isdense=True)
                     sigmas, counts, u_score = self.warp_uncert(batch, results,
-                                                               img_h, img_w, K,
+                                                               img_h, img_w, K,self.hparams.theta,
                                                                isdense=dense_tag)
                         # count_px = (counts > 0).sum()
                         # count_pct = count_px / (img_h * img_w)

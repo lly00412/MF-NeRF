@@ -52,8 +52,11 @@ def err2img(err,flip=False):
         err = 1 - (err / np.quantile(err, 0.9))*0.8
     else:
         err = (err / np.quantile(err, 0.9))*0.8
-    err_img = cv2.applyColorMap((err*255).astype(np.uint8),
-                                  cv2.COLORMAP_JET)
+    # err_img = cv2.applyColorMap((err*255).astype(np.uint8),
+    #                               cv2.COLORMAP_JET)
+    err_img = cv2.applyColorMap((err * 255).astype(np.uint8),
+                                cv2.COLORMAP_HOT)
+    err_img = cv2.cvtColor(err_img, cv2.COLOR_BGR2RGB)
     return err_img
 
 def u2img(err,flip=False):
@@ -111,6 +114,8 @@ class NeRFSystem(LightningModule):
         self.vs_time = 0
         if self.hparams.start>0:
             self.vs_log = os.path.join(f"logs/{self.hparams.dataset_name}", self.hparams.exp_name, 'vs_log.txt')
+        if self.hparams.view_select:
+            self.vs_epochs = [0]+[self.hparams.epoch_step*i-1 for i in range(1,self.hparams.N_vs)]
         self.current_vs = 0
         self.reweighted_samples = False
 
@@ -351,7 +356,7 @@ class NeRFSystem(LightningModule):
             self.run_vs = True
             self.reweighted_samples = False
 
-        if not self.hparams.view_select and self.hparams.val_only:
+        if (not self.hparams.view_select) and self.hparams.val_only:
             self.no_save_test = self.hparams.no_save_test
             self.save_output = self.hparams.save_output
             self.run_vs = False
@@ -406,7 +411,7 @@ class NeRFSystem(LightningModule):
         if not isdense:
             if len(opacity) > len(pix_ids):
                 opacity = opacity[pix_ids]
-            if len(entropys) > (pix_ids):
+            if len(entropys) > len(pix_ids):
                 entropys = entropys[pix_ids]
 
         nan_mask = torch.isnan(entropys)
@@ -415,7 +420,7 @@ class NeRFSystem(LightningModule):
         entropy_score = torch.nanmean(entropys[counts].flatten())
         return entropys.cpu(), counts.cpu(), entropy_score.cpu()
 
-    def warp_uncert(self, batch, results, img_h, img_w, K, isdense=True):
+    def warp_uncert(self, batch, results, img_h, img_w, K, theta, isdense=True):
         opacity = results['opacity'].cpu()  # (n_rays)
         if self.hparams.vs_sample_rate < 1:
             pix_idxs = results['pix_idxs']
@@ -436,7 +441,7 @@ class NeRFSystem(LightningModule):
                  'img_w': img_w}
 
         Vcam = GetVirtualCam(vargs)
-        thetas = [self.hparams.theta, -self.hparams.theta, self.hparams.theta, -self.hparams.theta]
+        thetas = [theta, -theta, theta, -theta]
         rot_ax = ['x', 'x', 'y', 'y']
         warp_depths = [vargs['ref_depth_map'][pix_idxs].cpu()]
         counts = 0
@@ -471,7 +476,7 @@ class NeRFSystem(LightningModule):
         return warp_sigmas.cpu(), counts.cpu(), warp_score.cpu()
 
     def mcd_uncert(self, batch, mcd_val='depth', pix_idxs=None, isdense=True):
-        enable_dropout(self.model.rgb_net, p=self.hparams.p)
+        enable_dropout(self.model.dropout, p=self.hparams.p)
         mcd_preds = []
         print(f'Start MC-Dropout...\n')
         counts = 0
@@ -484,21 +489,15 @@ class NeRFSystem(LightningModule):
                 mcd_results = self(batch, split='test')
             opacity = mcd_results['opacity']
             mcd_pred = mcd_results[mcd_val]
-            _mcd_pred = torch.full_like(mcd_pred, float("nan"))
-            _mcd_pred[opacity > 0] = mcd_pred[opacity > 0]
             counts += (opacity > 0)
-            mcd_preds.append(_mcd_pred)  # (h w) c
-            # mcd += mcd_results['rgb']
-            # mcd_squre += mcd_results['rgb'] ** 2
+            mcd_preds.append(mcd_pred)
             del mcd_results
-        close_dropout(self.model.rgb_net)
+        close_dropout(self.model.dropout)
         mcd_preds = torch.stack(mcd_preds, 0)  # rgb: n (h w) c    depth: n (h w)
         if mcd_preds.ndim > 2:
             mcd_preds = mcd_preds.mean(-1)
-        mcd_preds = mcd_preds.cpu().numpy()
-        mcd_sigmas = np.nanstd(mcd_preds, 0)
-        mcd_sigmas = torch.from_numpy(mcd_sigmas)
-
+        mcd_sigmas = mcd_preds.std(0)
+        counts = (counts > 0)
         counts = counts.cpu()
         mcd_score = torch.mean(mcd_sigmas[counts > 0].flatten())
         return mcd_sigmas.cpu(), counts.cpu(), mcd_score.cpu()
@@ -524,7 +523,7 @@ class NeRFSystem(LightningModule):
         if self.hparams.vs_by == 'warp':
             K = self.handout_dataset.K
             sigmas, counts, u_score = self.warp_uncert(batch, results,
-                                                       img_h, img_w, K,
+                                                       img_h, img_w, K, self.hparams.theta,
                                                         isdense=not (self.hparams.vs_sample_rate<1))
             counts = counts.to(torch.long)
         if self.hparams.vs_by in ['mcd_d', 'mcd_r']:
@@ -579,8 +578,8 @@ class NeRFSystem(LightningModule):
         if self.hparams.vs_by == 'warp':
             K = self.train_dataset.K
             _, _, u_score = self.warp_uncert(batch, results,
-                                                       img_h, img_w, K,
-                                                       isdense=not (self.hparams.vs_sample_rate < 1))
+                                             img_h, img_w, K, self.hparams.theta,
+                                             isdense=not (self.hparams.vs_sample_rate < 1))
         if self.hparams.vs_by == 'entropy':
             _, _, u_score = self.entropy_uncert(results,isdense=not (self.hparams.vs_sample_rate < 1))
 
@@ -662,11 +661,11 @@ class NeRFSystem(LightningModule):
                 if u_method == 'warp':
                     K = self.test_dataset.K
                     sigmas, counts, u_score = self.warp_uncert(batch, results,
-                                                               img_h, img_w, K,
+                                                               img_h, img_w, K, self.hparams.theta,
                                                                isdense=dense_tag)
                 if u_method in ['mcd_d', 'mcd_r']:
                     mcd_val = 'depth' if u_method == 'mcd_d' else 'rgb'
-                    sigmas, counts, u_score = self.mcd_uncert(batch, mcd_val, pix_idxs=None,
+                    sigmas, counts, u_score = self.mcd_uncert(batch, mcd_val, pix_idxs=results['pix_idxs'],
                                                               isdense=dense_tag)
                 if u_method == 'entropy':
                     sigmas, counts, u_score = self.entropy_uncert(results,isdense=dense_tag)

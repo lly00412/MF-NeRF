@@ -7,7 +7,7 @@ export CKPT_DIR=~/projects/MF-NeRF/ckpts/nsvf/Synthetic_NeRF/Hash/fewshot20/
 export CUDA_VISIBLE_DEVICES=0
 export PREFIX=Synthetic_NeRF/Hash/fewshot15_v2
 
-scenes=(Hotdog Chair Drums Ficus)
+scenes=(Hotdog)
 
 for SCENES in ${scenes[@]}
 do
