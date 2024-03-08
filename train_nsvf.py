@@ -243,7 +243,7 @@ class NeRFSystem(LightningModule):
         self.train_dataset.batch_size = self.hparams.batch_size
         self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
         # self.test_dataset = dataset(split='test', subs=[0,1,3],**kwargs)
-        self.test_dataset = dataset(split='test', subs=[0, 1, 3], **kwargs)
+        self.test_dataset = dataset(split='test', subs=self.hparams.test_img, **kwargs)
 
         if self.train_dataset.ray_sampling_strategy == "weighted_images":
             self.reweighted_samples = True
@@ -472,7 +472,7 @@ class NeRFSystem(LightningModule):
         warp_sigmas = np.nanstd(warp_depths.cpu().numpy(), axis=0)
         warp_sigmas = torch.from_numpy(warp_sigmas)
 
-        counts = counts.cpu()
+        counts = (counts>0).cpu()
         warp_score = torch.mean(warp_sigmas[counts > 0].flatten())
         return warp_sigmas.cpu(), counts.cpu(), warp_score.cpu()
 
@@ -638,10 +638,22 @@ class NeRFSystem(LightningModule):
             logs['lpips'] = score.mean()
             outputs['eval']['lpips'] = logs['lpips'].cpu().numpy()
 
+            render_log = os.path.join(self.val_dir, f'{img_id:03d}_render.txt')
+            psnr = logs['psnr'].item()
+            ssim = logs['ssim'].item()
+            lpips = logs['lpips'].item()
+            with open(render_log, 'a') as f:
+                f.write(f' psnr: {psnr}\n')
+                f.write(f' ssim: {ssim}\n')
+                if self.hparams.eval_lpips:
+                    f.write(f' lpips: {lpips}\n')
+                f.close()
+
         if self.hparams.eval_u:
             ROC_dict = {}
             AUC_dict = {}
             u_dict = {}
+            count_dict = {}
             common_counts = 0
             img_w, img_h = self.test_dataset.img_wh
             if self.hparams.vs_sample_rate < 1:
@@ -677,6 +689,7 @@ class NeRFSystem(LightningModule):
                 logs[u_method] = u_score
                 common_counts += counts
                 u_dict[u_method] = sigmas
+                count_dict[u_method] = counts
 
                 if not self.no_save_test:
                     sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
@@ -727,6 +740,9 @@ class NeRFSystem(LightningModule):
                 f.write(f' auc socres: \n')
                 for key in AUC_dict.keys():
                     f.write(f' {key} auc =  {AUC_dict[key]* 100.:.4f}\n')
+                    if key != 'rgb_err':
+                        n_pixels = count_dict[key].sum()
+                        f.write(f'pixel counts = {n_pixels}\n')
                 f.close()
 
         if not self.no_save_test: # save test image to disk
