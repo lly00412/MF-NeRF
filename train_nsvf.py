@@ -242,7 +242,8 @@ class NeRFSystem(LightningModule):
 
         self.train_dataset.batch_size = self.hparams.batch_size
         self.train_dataset.ray_sampling_strategy = self.hparams.ray_sampling_strategy
-        self.test_dataset = dataset(split='test', **kwargs)
+        # self.test_dataset = dataset(split='test', subs=[0,1,3],**kwargs)
+        self.test_dataset = dataset(split='test', subs=[0, 1, 3], **kwargs)
 
         if self.train_dataset.ray_sampling_strategy == "weighted_images":
             self.reweighted_samples = True
