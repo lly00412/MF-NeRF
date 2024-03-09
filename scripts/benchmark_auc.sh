@@ -20,7 +20,7 @@ echo ${SCENES}
 python train_nsvf.py \
     --root_dir ${ROOT_DIR}/Synthetic_NeRF/${SCENES} \
     --dataset_name nsvf \
-    --exp_name ${PREFIX}/${SCENES}/auc3/ \
+    --exp_name ${PREFIX}/${SCENES}/auc4/ \
     --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
     --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
     --rgb_channels 64 --rgb_layers 2 \
@@ -50,7 +50,7 @@ python train_nsvf.py \
 python train_nsvf.py \
     --root_dir ${ROOT_DIR}/Synthetic_NeRF/${SCENES} \
     --dataset_name nsvf \
-    --exp_name ${PREFIX}/${SCENES}/auc_sparse3/ \
+    --exp_name ${PREFIX}/${SCENES}/auc_sparse4/ \
     --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
     --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
     --rgb_channels 64 --rgb_layers 2 \

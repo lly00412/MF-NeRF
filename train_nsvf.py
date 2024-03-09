@@ -691,18 +691,35 @@ class NeRFSystem(LightningModule):
                 u_dict[u_method] = sigmas
                 count_dict[u_method] = counts
 
-                if not self.no_save_test:
-                    sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
-                    sigmas = sigmas.squeeze(1)
-                    counts = counts.cpu().numpy()
-                    u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
-                    if self.hparams.vs_sample_rate < 1:
-                        u_img[results['pix_idxs'].cpu().numpy()[counts > 0]] = sigmas
-                        u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
-                    else:
-                        u_img[counts > 0] = sigmas
-                        u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
-                    imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{u_method}_u.png'), u_img)
+                # if not self.no_save_test:
+                #     sigmas = u2img(sigmas[counts > 0].cpu().numpy())  # (n_rays) 1 3
+                #     sigmas = sigmas.squeeze(1)
+                #     counts = counts.cpu().numpy()
+                #     u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
+                #     if self.hparams.vs_sample_rate < 1:
+                #         u_img[results['pix_idxs'].cpu().numpy()[counts > 0]] = sigmas
+                #         u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
+                #     else:
+                #         u_img[counts > 0] = sigmas
+                #         u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
+                #     imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{u_method}_u.png'), u_img)
+
+            val_mask = (common_counts >= N_method)
+            if not self.no_save_test:
+                for u_method in self.hparams.u_by:
+                    sigmas = u_dict[u_method]
+                    if not self.no_save_test:
+                        sigmas = u2img(sigmas[val_mask].cpu().numpy())  # (n_rays) 1 3
+                        sigmas = sigmas.squeeze(1)
+                        counts = val_mask.cpu().numpy()
+                        u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
+                        if self.hparams.vs_sample_rate < 1:
+                            u_img[results['pix_idxs'].cpu().numpy()[counts>0]] = sigmas
+                            u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
+                        else:
+                            u_img[counts>0] = sigmas
+                            u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
+                        imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{u_method}_u.png'), u_img)
 
             if self.hparams.plot_roc:
                 if self.hparams.vs_sample_rate < 1:
@@ -715,14 +732,14 @@ class NeRFSystem(LightningModule):
                 rgb_err = (rgb_pred - rgb_gt) ** 2
                 rgb_err = rgb_err.reshape(img_h * img_w, 3)
 
-                val_mask = (common_counts >= N_method)
                 val_err = rgb_err[pix_idxs][val_mask]
-                rgb_err = val_err.mean(-1).flatten().numpy()
-                ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(rgb_err, rgb_err)
+                val_err = val_err.mean(-1).flatten().numpy()
+                ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(val_err, val_err)
 
                 for u_method in self.hparams.u_by:
                     sigmas = u_dict[u_method][val_mask].numpy()
-                    ROC_dict[u_method], AUC_dict[u_method] = compute_roc(rgb_err, sigmas)
+                    ROC_dict[u_method], AUC_dict[u_method] = compute_roc(val_err, sigmas)
+
 
             logs['ROC'] = ROC_dict.copy()
             logs['AUC'] = AUC_dict.copy()
@@ -732,6 +749,7 @@ class NeRFSystem(LightningModule):
 
             auc_log = os.path.join(self.val_dir, f'{img_id:03d}_auc.txt')
             with open(auc_log, 'a') as f:
+                f.write(f'common pixels = {val_mask.sum()}\n')
                 for u_method in self.hparams.u_by:
                     if u_method in ['mcd_d', 'mcd_r']:
                         f.write(f'{u_method} params: \n')
