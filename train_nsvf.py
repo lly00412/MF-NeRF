@@ -460,21 +460,24 @@ class NeRFSystem(LightningModule):
             warp_opacity = v_opacity[out_pix_idxs.cpu()]
 
             if not isdense:
-                warp_depth[out_pix_idxs == 0] = float('nan')
+                warp_depth[out_pix_idxs == 0] = 0
                 # warp_depth[opacity == 0] = float('nan')
-                warp_depth[warp_opacity == 0] = float('nan')
-                counts += (out_pix_idxs.cpu() > 0) & (warp_opacity > 0)
+                warp_depth[warp_opacity == 0] = 0
+                # counts += (out_pix_idxs.cpu() > 0) & (warp_opacity > 0)
+                counts += (warp_opacity > 0)
             else:
-                warp_depth[warp_depth == 0] = float('nan')
+                warp_depth[warp_depth == 0] = 0
                 # warp_depth[opacity == 0] = float('nan')
-                warp_depth[warp_opacity == 0] = float('nan')
-                counts += (warp_depth.cpu() > 0) & (warp_opacity > 0)
+                warp_depth[warp_opacity == 0] = 0
+                # counts += (warp_depth.cpu() > 0) & (warp_opacity > 0)
+                counts += (warp_opacity > 0)
             warp_depth = warp_depth.cpu()
             warp_depths += [warp_depth]
 
         warp_depths = torch.stack(warp_depths)
-        warp_sigmas = np.nanstd(warp_depths.cpu().numpy(), axis=0)
-        warp_sigmas = torch.from_numpy(warp_sigmas)
+        # warp_sigmas = np.nanstd(warp_depths.cpu().numpy(), axis=0)
+        # warp_sigmas = torch.from_numpy(warp_sigmas)
+        warp_sigmas = torch.std(warp_depths.cpu(), dim=0)
 
         counts = (counts>0).cpu() & (opacity>0).cpu()
         warp_score = torch.mean(warp_sigmas[counts > 0].flatten())
@@ -821,7 +824,8 @@ class NeRFSystem(LightningModule):
 
             for u_method in self.hparams.u_by:
                 ROCs[u_method] = np.stack([x['ROC'][u_method] for x in outputs]).mean(0)
-                AUCs[u_method] = np.array([x['AUC'][u_method] for x in outputs]).mean(0)
+                # AUCs[u_method] = np.array([x['AUC'][u_method] for x in outputs]).mean(0)
+                AUCs[u_method] = np.trapz(ROCs[u_method], dx=1. / 10)
 
             fig_name = os.path.join(self.val_dir, f'scene_avg_roc.png')
             plot_roc(ROCs, fig_name, opt_label='rgb_err')
