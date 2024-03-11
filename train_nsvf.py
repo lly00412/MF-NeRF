@@ -451,20 +451,24 @@ class NeRFSystem(LightningModule):
             new_c2w = Vcam.get_near_c2w(batch['pose'].clone().cpu(), theta=theta, axis=ax)
             v_results = self.render_virtual_cam(new_c2w, batch)
             v_depth = v_results['depth'].cpu()
+            v_opacity = v_results['opacity'].cpu()
 
             _, out_pix_idxs = warp_tgt_to_ref_sparse(results['depth'].cpu(), new_c2w, batch['pose'],
                                                      K,
                                                      pix_idxs, (img_h, img_w), device)
             warp_depth = v_depth[out_pix_idxs.cpu()]
+            warp_opacity = v_opacity[out_pix_idxs.cpu()]
 
             if not isdense:
                 warp_depth[out_pix_idxs == 0] = float('nan')
-                warp_depth[opacity == 0] = float('nan')
-                counts += (out_pix_idxs.cpu() > 0) & (opacity > 0)
+                # warp_depth[opacity == 0] = float('nan')
+                warp_depth[warp_opacity == 0] = float('nan')
+                counts += (out_pix_idxs.cpu() > 0) & (warp_opacity > 0)
             else:
                 warp_depth[warp_depth == 0] = float('nan')
-                warp_depth[opacity == 0] = float('nan')
-                counts += (warp_depth.cpu() > 0) & (opacity > 0)
+                # warp_depth[opacity == 0] = float('nan')
+                warp_depth[warp_opacity == 0] = float('nan')
+                counts += (warp_depth.cpu() > 0) & (warp_opacity > 0)
             warp_depth = warp_depth.cpu()
             warp_depths += [warp_depth]
 
@@ -472,7 +476,7 @@ class NeRFSystem(LightningModule):
         warp_sigmas = np.nanstd(warp_depths.cpu().numpy(), axis=0)
         warp_sigmas = torch.from_numpy(warp_sigmas)
 
-        counts = (counts>0).cpu()
+        counts = (counts>0).cpu() & (opacity>0).cpu()
         warp_score = torch.mean(warp_sigmas[counts > 0].flatten())
         return warp_sigmas.cpu(), counts.cpu(), warp_score.cpu()
 
@@ -498,7 +502,7 @@ class NeRFSystem(LightningModule):
         if mcd_preds.ndim > 2:
             mcd_preds = mcd_preds.mean(-1)
         mcd_sigmas = mcd_preds.std(0)
-        counts = (counts > 0)
+        counts = (counts >= 0.5*N_passes)
         counts = counts.cpu()
         mcd_score = torch.mean(mcd_sigmas[counts > 0].flatten())
         return mcd_sigmas.cpu(), counts.cpu(), mcd_score.cpu()
