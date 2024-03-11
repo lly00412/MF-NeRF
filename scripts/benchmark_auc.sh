@@ -10,7 +10,8 @@ export CUDA_VISIBLE_DEVICES=0
 export BASE_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/nsvf/Synthetic_NeRF/Hash/fewshot10/
 export PREFIX=Synthetic_NeRF/Hash/fewshot10
 
-scenes=(Drums)
+#scenes=(Drums)
+scenes=(Chair Ficus Hotdog)
 methods=(warp mcd_d mcd_r entropy)
 
 for SCENES in ${scenes[@]}
@@ -20,7 +21,7 @@ echo ${SCENES}
 python train_nsvf.py \
     --root_dir ${ROOT_DIR}/Synthetic_NeRF/${SCENES} \
     --dataset_name nsvf \
-    --exp_name ${PREFIX}/${SCENES}/auc4/ \
+    --exp_name ${PREFIX}/${SCENES}/auc5/ \
     --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
     --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
     --rgb_channels 64 --rgb_layers 2 \
@@ -50,7 +51,7 @@ python train_nsvf.py \
 python train_nsvf.py \
     --root_dir ${ROOT_DIR}/Synthetic_NeRF/${SCENES} \
     --dataset_name nsvf \
-    --exp_name ${PREFIX}/${SCENES}/auc_sparse4/ \
+    --exp_name ${PREFIX}/${SCENES}/auc_sparse5/ \
     --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
     --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
     --rgb_channels 64 --rgb_layers 2 \

@@ -43,6 +43,7 @@ from utils import *
 # from warp.warp_utils import warp_tgt_to_ref
 import time
 from tqdm import trange
+import pandas as pd
 
 import warnings; warnings.filterwarnings("ignore")
 
@@ -366,6 +367,8 @@ class NeRFSystem(LightningModule):
         self.val_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}'
         os.makedirs(self.val_dir, exist_ok=True)
 
+        self.render_log = os.path.join(self.val_dir, f'render.csv')
+
         if self.save_output:
             self.out_dir = f'results/{self.hparams.dataset_name}/{self.hparams.exp_name}/output/'
             os.makedirs(self.out_dir, exist_ok=True)
@@ -505,7 +508,7 @@ class NeRFSystem(LightningModule):
         if mcd_preds.ndim > 2:
             mcd_preds = mcd_preds.mean(-1)
         mcd_sigmas = mcd_preds.std(0)
-        counts = (counts >= 0.5*N_passes)
+        counts = (counts > 0)
         counts = counts.cpu()
         mcd_score = torch.mean(mcd_sigmas[counts > 0].flatten())
         return mcd_sigmas.cpu(), counts.cpu(), mcd_score.cpu()
@@ -604,6 +607,8 @@ class NeRFSystem(LightningModule):
                    'eval':{}}
         rgb_gt = batch['rgb']
 
+        result_df = pd.DataFrame()
+
         results = self(batch,split='test')
         img_w, img_h = self.test_dataset.img_wh
         results['pix_idxs'] = torch.arange(img_h * img_w)
@@ -645,16 +650,10 @@ class NeRFSystem(LightningModule):
             logs['lpips'] = score.mean()
             outputs['eval']['lpips'] = logs['lpips'].cpu().numpy()
 
-            render_log = os.path.join(self.val_dir, f'{img_id:03d}_render.txt')
-            psnr = logs['psnr'].item()
-            ssim = logs['ssim'].item()
-            lpips = logs['lpips'].item()
-            with open(render_log, 'a') as f:
-                f.write(f' psnr: {psnr}\n')
-                f.write(f' ssim: {ssim}\n')
-                if self.hparams.eval_lpips:
-                    f.write(f' lpips: {lpips}\n')
-                f.close()
+            # render_log = os.path.join(self.val_dir, f'{img_id:03d}_render.txt')
+            result_df.at[img_id,'psnr'] = logs['psnr'].item()
+            result_df.at[img_id, 'ssim'] = logs['ssim'].item()
+            result_df.at[img_id, 'lpips'] = logs['lpips'].item()
 
         if self.hparams.eval_u:
             ROC_dict = {}
@@ -762,13 +761,24 @@ class NeRFSystem(LightningModule):
                         f.write(f'{u_method} params: \n')
                         f.write(f'n_passes = {self.hparams.n_passes}\n')
                         f.write(f'drop prob = {self.hparams.p}\n')
-                f.write(f' auc socres: \n')
-                for key in AUC_dict.keys():
-                    f.write(f' {key} auc =  {AUC_dict[key]* 100.:.4f}\n')
-                    if key != 'rgb_err':
-                        n_pixels = count_dict[key].sum()
-                        f.write(f'pixel counts = {n_pixels}\n')
-                f.close()
+                # f.write(f' auc socres: \n')
+                # for key in AUC_dict.keys():
+                #     f.write(f' {key} auc =  {AUC_dict[key]* 100.:.4f}\n')
+                #     if key != 'rgb_err':
+                #         n_pixels = count_dict[key].sum()
+                #         f.write(f'pixel counts = {n_pixels}\n')
+                # f.close()
+
+            for u_method in self.hparams.u_by:
+                result_df.at[img_id, f'{u_method}_auc'] = logs[u_method].item()
+
+            result_df.at[img_id, f'common_npx'] = val_mask.sum().item()
+
+            for key in AUC_dict.keys():
+                result_df.at[img_id, f'{key}_auc'] = AUC_dict[key]* 100.
+                if key != 'rgb_err':
+                    n_pixels = count_dict[key].sum().item()
+                    result_df.at[img_id, f'{key}_npx'] = n_pixels
 
         if not self.no_save_test: # save test image to disk
             idx = batch['img_idxs']
@@ -798,6 +808,9 @@ class NeRFSystem(LightningModule):
                 torch.save(outputs,out_file)
 
             del rgb_gt,rgb_pred,err,depth,results,outputs,batch
+
+        hdr = False if os.path.isfile(self.render_log) else True
+        result_df.to_csv(self.render_log, mode='a', header=hdr)
 
         return logs
 
