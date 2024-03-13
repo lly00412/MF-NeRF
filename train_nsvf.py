@@ -430,8 +430,13 @@ class NeRFSystem(LightningModule):
             pix_idxs = results['pix_idxs']
         else:
             pix_idxs = torch.arange(img_h * img_w)
+        # if len(opacity) > len(pix_idxs):
+        #     opacity = opacity[pix_idxs]
         if len(opacity) > len(pix_idxs):
             opacity = opacity[pix_idxs]
+            warp_depths = [results['depth'][pix_idxs].cpu()]
+        else:
+            warp_depths = [results['depth'].cpu()]
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         vargs = {'ref_c2w': batch['pose'].clone().cpu(),
@@ -447,7 +452,6 @@ class NeRFSystem(LightningModule):
         Vcam = GetVirtualCam(vargs)
         thetas = [theta, -theta, theta, -theta]
         rot_ax = ['x', 'x', 'y', 'y']
-        warp_depths = [vargs['ref_depth_map'][pix_idxs].cpu()]
         counts = 0
 
         for theta, ax in zip(thetas, rot_ax):
