@@ -17,30 +17,59 @@ def get_opts():
 if __name__ == '__main__':
     args = get_opts()
 
-    evals = ['lpips_vgg', 'psnr', 'ssim']
-    for scene in args.scenes:
-        print(scene)
-        result_df = pd.DataFrame(columns=['views','lpips','psnr','ssim'])
-        log_path = os.path.join(args.log_dir, scene)
+    # evals = ['lpips_vgg', 'psnr', 'ssim']
+    # for scene in args.scenes:
+    #     print(scene)
+    #     result_df = pd.DataFrame(columns=['views','lpips','psnr','ssim'])
+    #     log_path = os.path.join(args.log_dir, scene)
+    #
+    #     vs_labels = os.listdir(log_path)
+    #     if 'summary' in vs_labels:
+    #         vs_labels.remove('summary')
+    #     N_vs = len(vs_labels)
+    #     for i in range(N_vs):
+    #         log = f'{log_path}/{vs_labels[i]}/scores/{args.file_name}.csv'
+    #         eval_data = pd.read_csv(log)
+    #         result_df.at[i, 'views'] = int(vs_labels[i][2:])
+    #         for key in eval_data.keys():
+    #             value = eval_data.at[0,key]
+    #             if isinstance(value,str):
+    #                 if 'tensor' in value:
+    #                     value = value.replace('(',',').replace(')',',').split(',')
+    #                     value = float(value[1])
+    #             result_df.at[i,key] = value
+    #
+    #     os.makedirs(os.path.join(args.log_dir,scene,'summary'),exist_ok=True)
+    #     file_path = f'{args.log_dir}/{scene}/summary/{args.save_name}.csv'
+    #     print(f'Save to {file_path}')
+    #     result_df.to_csv(file_path, index=False)
 
-        vs_labels = os.listdir(log_path)
-        if 'summary' in vs_labels:
-            vs_labels.remove('summary')
-        N_vs = len(vs_labels)
-        for i in range(N_vs):
-            log = f'{log_path}/{vs_labels[i]}/scores/{args.file_name}.csv'
-            eval_data = pd.read_csv(log)
-            result_df.at[i, 'views'] = int(vs_labels[i][2:])
-            for key in eval_data.keys():
-                value = eval_data.at[0,key]
-                if isinstance(value,str):
-                    if 'tensor' in value:
-                        value = value.replace('(',',').replace(')',',').split(',')
-                        value = float(value[1])
-                result_df.at[i,key] = value
+    evals = ['lpips', 'psnr', 'ssim']
 
-        os.makedirs(os.path.join(args.log_dir,scene,'summary'),exist_ok=True)
-        file_path = f'{args.log_dir}/{scene}/summary/{args.save_name}.csv'
-        print(f'Save to {file_path}')
-        result_df.to_csv(file_path, index=False)
+    result_df = pd.DataFrame(columns=['steps','lpips','psnr','ssim'])
+    # log_path = os.path.join(args.log_dir, scene)
+    log_path = os.path.join(args.log_dir)
+
+    vs_labels = os.listdir(log_path)
+    if 'summary' in vs_labels:
+        vs_labels.remove('summary')
+    if 'vs0' in vs_labels:
+        vs_labels.remove('vs0')
+    N_vs = len(vs_labels)
+    for i in range(0,N_vs):
+        log = f'{log_path}/{vs_labels[i]}/eval/vs1/{args.file_name}.csv'
+        eval_data = pd.read_csv(log)
+        result_df.at[i, 'steps'] = i+1
+        for key in eval_data.keys():
+            value = eval_data[key].iloc[-1]
+            if isinstance(value,str):
+                if 'tensor' in value:
+                    value = value.replace('(',',').replace(')',',').split(',')
+                    value = float(value[1])
+            result_df.at[i,key] = value
+
+    os.makedirs(os.path.join(args.log_dir,'summary'),exist_ok=True)
+    file_path = f'{args.log_dir}/summary/{args.save_name}.csv'
+    print(f'Save to {file_path}')
+    result_df.to_csv(file_path, index=False)
 

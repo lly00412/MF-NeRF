@@ -789,6 +789,7 @@ class NeRFSystem(LightningModule):
             rgb_pred = rearrange(results['rgb'].cpu().numpy(), '(h w) c -> h w c', h=h)
             outputs['data']['rgb_pred'] = rgb_pred
 
+
             ###### add errs ###########
             rgb_gt = rearrange(batch['rgb'].cpu().numpy(), '(h w) c -> h w c', h=h)
             outputs['data']['rgb_gt'] = rgb_gt
@@ -819,19 +820,29 @@ class NeRFSystem(LightningModule):
         return logs
 
     def validation_epoch_end(self, outputs):
+
+        result_df = pd.DataFrame()
+        avg_id = len(outputs)
+
         psnrs = torch.stack([x['psnr'] for x in outputs])
         mean_psnr = all_gather_ddp_if_available(psnrs).mean()
         self.log('test/psnr', mean_psnr, True)
+        result_df.at[avg_id, 'psnr'] = mean_psnr.item()
 
 
         ssims = torch.stack([x['ssim'] for x in outputs])
         mean_ssim = all_gather_ddp_if_available(ssims).mean()
         self.log('test/ssim', mean_ssim)
+        result_df.at[avg_id, 'ssim'] = mean_ssim.item()
 
         if self.hparams.eval_lpips:
             lpipss = torch.stack([x['lpips'] for x in outputs])
             mean_lpips = all_gather_ddp_if_available(lpipss).mean()
             self.log('test/lpips_vgg', mean_lpips)
+            result_df.at[avg_id, 'lpips'] = mean_lpips.item()
+
+        hdr = False if os.path.isfile(self.render_log) else True
+        result_df.to_csv(self.render_log, mode='a', header=hdr)
 
         if self.hparams.plot_roc:
             ROCs = {}
