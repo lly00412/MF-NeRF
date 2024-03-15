@@ -407,6 +407,21 @@ class NeRFSystem(LightningModule):
                 results[k] = torch.cat([r[k].clone() for r in all_results])
         del all_results
         return results
+    def err_uncert(self, batch,results, isdense=True):
+        rgb_preds = results['rgb']  # (n_rays)
+        pix_ids = results['pix_idxs'].to(rgb_preds)
+        opacity = results['opacity'].to(rgb_preds)
+        rgb_gts = batch['rgb'].to(rgb_preds) #(h w) c
+        if not isdense:
+            if len(opacity) > len(pix_ids):
+                opacity = opacity[pix_ids]
+            if len(rgb_gts) > len(pix_ids):
+                rgb_gts = rgb_gts[pix_ids]
+        errs = (rgb_gts - rgb_preds)**2
+        errs = errs.mean(-1)
+        counts = (opacity > 0)
+        err_score = torch.mean(errs.flatten())
+        return errs.cpu(), counts.cpu(), err_score.cpu()
 
     def entropy_uncert(self, results, isdense=True):
         pix_ids = results['pix_idxs']
@@ -549,6 +564,10 @@ class NeRFSystem(LightningModule):
         if self.hparams.vs_by == 'entropy':
             sigmas, counts, u_score = self.entropy_uncert(results)
             counts = counts.to(torch.long)
+
+        if self.hparams.vs_by == 'l2':
+            sigmas, counts, u_score = self.err_uncert(batch, results, isdense=not (self.hparams.vs_sample_rate<1))
+
         # opacity = results['opacity'].cpu()
         # print(f'img {img_id} uncert score:{u_score}')
         # print(f'Total resolution: {img_h * img_w}')
@@ -692,6 +711,10 @@ class NeRFSystem(LightningModule):
                                                               isdense=dense_tag)
                 if u_method == 'entropy':
                     sigmas, counts, u_score = self.entropy_uncert(results,isdense=dense_tag)
+                    counts = counts.to(torch.float)
+
+                if u_method == 'l2':
+                    sigmas, counts, u_score = self.err_uncert(batch,results,isdense=dense_tag)
                     counts = counts.to(torch.float)
 
                 counts = counts.to(torch.long)
