@@ -588,7 +588,7 @@ class NeRFSystem(LightningModule):
                 u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
             imageio.imsave(os.path.join(self.vs_dir, f'{img_id:03d}_vsu.png'), u_img)
 
-        print(u_score)
+        print(f'{self.hparams.vs_by}_score: {u_score.item()}')
         return u_score
 
     def weight_train_samples(self, batch, batch_nb):
@@ -621,6 +621,8 @@ class NeRFSystem(LightningModule):
             mcd_val = 'depth' if self.hparams.vs_by == 'mcd_d' else 'rgb'
             _, _, u_score = self.mcd_uncert(batch, mcd_val, results['pix_idxs'],
                                                       isdense=not (self.hparams.vs_sample_rate < 1))
+        if self.hparams.vs_by in 'l2':
+            _, _, u_score = self.err_uncert(batch, results, isdense=not (self.hparams.vs_sample_rate < 1))
         return u_score
 
     def validation_step(self, batch, batch_nb):
