@@ -1,12 +1,8 @@
 import torch
 from torch import nn
-from opt import get_opts
-import glob
+from active_opt import get_opts
 import imageio
-import numpy as np
-import cv2
 from einops import rearrange
-import os
 
 # data
 from torch.utils.data import DataLoader
@@ -41,43 +37,12 @@ from pytorch_lightning.utilities.distributed import all_gather_ddp_if_available
 
 from utils import *
 from uncert_utils import *
-# from warp.warp_utils import warp_tgt_to_ref
 import time
 from tqdm import trange
 import pandas as pd
 
 import warnings; warnings.filterwarnings("ignore")
 
-
-def err2img(err,flip=False):
-    if flip:
-        err = 1 - (err / np.quantile(err, 0.9))*0.8
-    else:
-        err = (err / np.quantile(err, 0.9))*0.8
-    # err_img = cv2.applyColorMap((err*255).astype(np.uint8),
-    #                               cv2.COLORMAP_JET)
-    err_img = cv2.applyColorMap((err * 255).astype(np.uint8),
-                                cv2.COLORMAP_HOT)
-    err_img = cv2.cvtColor(err_img, cv2.COLOR_BGR2RGB)
-    return err_img
-
-def u2img(err,flip=False):
-    err = (err / np.quantile(err, 0.9))*0.8
-    err_img = cv2.applyColorMap((err*255).astype(np.uint8),
-                                  cv2.COLORMAP_HOT)
-    err_img = cv2.cvtColor(err_img,cv2.COLOR_BGR2RGB)
-    return err_img
-
-def depth2img(depth):
-    depth = (depth-depth.min())/(depth.max()-depth.min())
-    depth_img = cv2.applyColorMap((depth*255).astype(np.uint8),
-                                  cv2.COLORMAP_TURBO)
-    return depth_img
-
-def depth2img_gray(depth):
-    depth = (depth-depth.min())/(depth.max()-depth.min())
-    depth_img = (depth*255).astype(np.uint8)
-    return depth_img
 
 class NeRFSystem(LightningModule):
     def __init__(self, hparams):
@@ -114,12 +79,14 @@ class NeRFSystem(LightningModule):
             create_meshgrid3d(G, G, G, False, dtype=torch.int32).reshape(-1, 3))
         self.star_time = time.time()
         self.vs_time = 0
-        if self.hparams.start>0:
+        if self.hparams.init_vs>0:
             self.vs_log = os.path.join(f"logs/{self.hparams.dataset_name}", self.hparams.exp_name, 'vs_log.txt')
         if self.hparams.view_select:
             self.vs_epochs = [0]+[self.hparams.epoch_step*i-1 for i in range(1,self.hparams.N_vs)]
         self.current_vs = 0
         self.reweighted_samples = False
+        if self.hparams.save_csv:
+            self.csv = os.path.join(f"logs/{self.hparams.dataset_name}", self.hparams.exp_name, 'results.csv')
 
     def forward(self, batch, split, isvs=False):
         if split=='train':
@@ -159,18 +126,17 @@ class NeRFSystem(LightningModule):
         return render(self.model, rays_o, rays_d, **kwargs)
 
 
-
     def setup(self, stage):
         dataset = dataset_dict[self.hparams.dataset_name]
         kwargs = {'root_dir': self.hparams.root_dir,
                   'downsample': self.hparams.downsample}
 
         self.train_dataset = dataset(split=self.hparams.split,
-                                     fewshot=self.hparams.start,
+                                     fewshot=self.hparams.init_vs,
                                      subs=self.hparams.train_img,
                                      seed=self.hparams.vs_seed,
                                      **kwargs)
-        if self.hparams.start>0:
+        if self.hparams.init_vs>0:
             with open(self.vs_log, 'a') as f:
                 f.write(f'Num of train img: {len(self.train_dataset.subs)}\n')
                 f.write(f'Current train ids: {self.train_dataset.subs}\n')

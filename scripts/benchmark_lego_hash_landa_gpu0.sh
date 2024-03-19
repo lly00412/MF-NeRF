@@ -7,9 +7,9 @@ export CKPT_DIR=~/projects/MF-NeRF/ckpts/nsvf/Synthetic_NeRF/Hash/fewshot20/
 export CUDA_VISIBLE_DEVICES=0
 export PREFIX=Synthetic_NeRF/Hash/fewshot15
 
-#scenes=(Hotdog Chair Drums Ficus)
-scenes=(Hotdog)
-method=grad
+scenes=(Hotdog Chair Drums Ficus)
+
+method=l2
 
 for SCENES in ${scenes[@]}
 do
@@ -18,7 +18,7 @@ echo ${SCENES}
 python train_nsvf.py \
     --root_dir ${ROOT_DIR}/${SCENES} \
     --dataset_name nsvf \
-    --exp_name ${PREFIX}/${SCENES}/ \
+    --exp_name ${PREFIX}/${SCENES}/reweighted/ \
     --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
     --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
     --rgb_channels 64 --rgb_layers 2 \
@@ -29,10 +29,10 @@ python train_nsvf.py \
     --start 10 --N_vs 4 --view_step 1 --epoch_step 20 \
     --n_centers 10 \
     --vs_by ${method} \
+    --theta 3 \
     --vs_sample_rate 1.0
 
 done
-
 
 #for SCENES in ${scenes[@]}
 #do

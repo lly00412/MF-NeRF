@@ -9,30 +9,12 @@ export PREFIX=Synthetic_NeRF/Hash/fewshot15
 
 #scenes=(Hotdog Chair Drums Ficus)
 scenes=(Hotdog Chair Drums Ficus)
+
 method=warp
 
 for SCENES in ${scenes[@]}
 do
 echo ${SCENES}
-
-python train_nsvf.py \
-    --root_dir ${ROOT_DIR}/${SCENES} \
-    --dataset_name nsvf \
-    --exp_name ${PREFIX}/${SCENES}/reweighted/ \
-    --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
-    --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
-    --rgb_channels 64 --rgb_layers 2 \
-    --view_select --vs_seed 66985 \
-    --ckpt_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \
-    --pre_train_epoch 20 \
-    --ray_sampling_strategy weighted_images \
-    --start 10 --N_vs 4 --view_step 1 --epoch_step 20 \
-    --n_centers 10 \
-    --vs_by ${method} \
-    --theta 3 \
-    --vs_sample_rate 1.0
-
-done
 
 python train_nsvf.py \
     --root_dir ${ROOT_DIR}/${SCENES} \
@@ -44,7 +26,30 @@ python train_nsvf.py \
     --view_select --vs_seed 66985 \
     --ckpt_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \
     --pre_train_epoch 20 \
-    --ray_sampling_strategy weighted_images \
+    --start 10 --N_vs 4 --view_step 1 --epoch_step 20 \
+    --n_centers 10 \
+    --vs_by ${method} \
+    --theta 3 \
+    --vs_sample_rate 1.0
+
+done
+
+method=l2
+
+for SCENES in ${scenes[@]}
+do
+echo ${SCENES}
+
+python train_nsvf.py \
+    --root_dir ${ROOT_DIR}/${SCENES} \
+    --dataset_name nsvf \
+    --exp_name ${PREFIX}/${SCENES}/uniform/ \
+    --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
+    --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
+    --rgb_channels 64 --rgb_layers 2 \
+    --view_select --vs_seed 66985 \
+    --ckpt_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \
+    --pre_train_epoch 20 \
     --start 10 --N_vs 4 --view_step 1 --epoch_step 20 \
     --n_centers 10 \
     --vs_by ${method} \
