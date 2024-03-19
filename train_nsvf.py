@@ -407,11 +407,38 @@ class NeRFSystem(LightningModule):
                 results[k] = torch.cat([r[k].clone() for r in all_results])
         del all_results
         return results
+
+    def grad_uncert(self, batch,results, isdense=True):
+        rgb_preds = results['rgb']  # (n_rays)
+        pix_ids = results['pix_idxs'].to(rgb_preds.device)
+        opacity = results['opacity'].to(rgb_preds.device)
+        rgb_gts = batch['rgb'].to(rgb_preds.device)  # (h w) c
+        net_params = []
+        for n, p in self.named_parameters():
+            if n not in ['dR', 'dT']: net_params += [p]
+        if not isdense:
+            if len(opacity) > len(pix_ids):
+                opacity = opacity[pix_ids]
+            if len(rgb_gts) > len(pix_ids):
+                rgb_gts = rgb_gts[pix_ids]
+        self.model.train()
+        loss_d = self.loss(results, batch)
+        loss = loss_d['rgb']
+        loss.backward()
+        grads = [p.grad.detach().reshape(-1) for p in net_params]
+        print([grad.size() for grad in grads])
+        counts = (opacity > 0)
+        grad_score = torch.mean(grads[counts].flatten())
+        self.optimizers.zero_grad(set_to_none = True)
+        self.model.eval()
+        return grads.cpu(), counts.cpu(), grad_score.cpu()
+
+
     def err_uncert(self, batch,results, isdense=True):
         rgb_preds = results['rgb']  # (n_rays)
-        pix_ids = results['pix_idxs'].to(rgb_preds)
-        opacity = results['opacity'].to(rgb_preds)
-        rgb_gts = batch['rgb'].to(rgb_preds) #(h w) c
+        pix_ids = results['pix_idxs'].to(rgb_preds.device)
+        opacity = results['opacity'].to(rgb_preds.device)
+        rgb_gts = batch['rgb'].to(rgb_preds.device) #(h w) c
         if not isdense:
             if len(opacity) > len(pix_ids):
                 opacity = opacity[pix_ids]
@@ -420,7 +447,7 @@ class NeRFSystem(LightningModule):
         errs = (rgb_gts - rgb_preds)**2
         errs = errs.mean(-1)
         counts = (opacity > 0)
-        err_score = torch.mean(errs.flatten())
+        err_score = torch.mean(errs[counts].flatten())
         return errs.cpu(), counts.cpu(), err_score.cpu()
 
     def entropy_uncert(self, results, isdense=True):
@@ -567,6 +594,9 @@ class NeRFSystem(LightningModule):
 
         if self.hparams.vs_by == 'l2':
             sigmas, counts, u_score = self.err_uncert(batch, results, isdense=not (self.hparams.vs_sample_rate<1))
+
+        if self.hparams.vs_by == 'grad':
+            sigmas, counts, u_score = self.grad_uncert(batch, results, isdense=not (self.hparams.vs_sample_rate<1))
 
         # opacity = results['opacity'].cpu()
         # print(f'img {img_id} uncert score:{u_score}')
@@ -717,6 +747,10 @@ class NeRFSystem(LightningModule):
 
                 if u_method == 'l2':
                     sigmas, counts, u_score = self.err_uncert(batch,results,isdense=dense_tag)
+                    counts = counts.to(torch.float)
+
+                if u_method == 'grad':
+                    sigmas, counts, u_score = self.grad_uncert(batch,results,isdense=dense_tag)
                     counts = counts.to(torch.float)
 
                 counts = counts.to(torch.long)
