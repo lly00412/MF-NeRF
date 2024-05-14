@@ -11,11 +11,12 @@ from .color_utils import read_image
 from .base import BaseDataset
 
 
-class NeRFPPDataset(BaseDataset):
-    def __init__(self, root_dir, split='train', downsample=1.0, fewshot=0,fewshot_seed=340,**kwargs):
+class SplitNeRFPPDataset(BaseDataset):
+    def __init__(self, root_dir, split='train', downsample=1.0, fewshot=0,fewshot_seed=340,subs=None,**kwargs):
         super().__init__(root_dir, split, downsample,fewshot,fewshot_seed)
         self.fewshot = fewshot
         self.seed = fewshot_seed
+        self.subs = subs
 
         self.read_intrinsics()
 
@@ -50,13 +51,17 @@ class NeRFPPDataset(BaseDataset):
                 img_paths = sorted(glob.glob(os.path.join(self.root_dir, split, 'rgb/*')))
                 poses = sorted(glob.glob(os.path.join(self.root_dir, split, 'pose/*.txt')))
 
+            if self.subs is not None:
+                self.full = len(img_paths)
+                img_paths = np.array(img_paths)[self.subs]
+                poses = np.array(poses)[self.subs]
 
-
-            if self.fewshot>0:
+            elif self.fewshot > 0:
                 np.random.seed(self.seed)
-                subs = np.random.choice(len(img_paths), self.fewshot)
-                img_paths = np.array(img_paths)[subs]
-                poses = np.array(poses)[subs]
+                self.full = len(img_paths)
+                self.subs = np.random.choice(len(img_paths), self.fewshot, replace=False)
+                img_paths = np.array(img_paths)[self.subs]
+                poses = np.array(poses)[self.subs]
 
             print(f'Loading {len(img_paths)} {split} images ...')
             for img_path, pose in tqdm(zip(img_paths, poses)):
@@ -66,4 +71,5 @@ class NeRFPPDataset(BaseDataset):
                 self.rays += [img]
 
             self.rays = torch.FloatTensor(np.stack(self.rays)) # (N_images, hw, ?)
+        self.cam_centers = np.array([pose[:3, 3:4] for pose in self.poses])
         self.poses = torch.FloatTensor(self.poses) # (N_images, 3, 4)
