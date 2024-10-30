@@ -16,6 +16,8 @@ class GetVirtualCam:
         self.img_w = kwargs['img_w']
         self.dense = kwargs['dense_map']
         self.opacity = kwargs['opacity']
+        self.camera_center = self.ref_c2w[:3, 3].clone().to(self.device)
+
         if self.dense:
             self.ref_depth_map = self.ref_depth_map.reshape(self.img_h,self.img_w)
 
@@ -100,12 +102,14 @@ class GetVirtualCam:
 
         return scene_center.cpu()
 
+
+
+
     def get_near_c2w(self, c2w, theta=5, axis='x'):
         cam_center = c2w[:3, 3:4].clone().to(self.scene_center)
         cam_center = cam_center.squeeze()
         trans_c2s = self.get_translation_matrix(cam_center,self.scene_center)
         rot = self.get_rotation_matrix(theta, axis)
-
         c2w_homo = torch.eye(4)
         c2w_homo[:3] = c2w.clone().cpu()
         c2w_homo = c2w_homo.to(torch.float32)

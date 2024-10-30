@@ -21,17 +21,17 @@ echo ${SCENES}
 python train_nsvf.py \
     --root_dir ${ROOT_DIR}/Synthetic_NeRF/${SCENES} \
     --dataset_name nsvf \
-    --exp_name ${PREFIX}/${SCENES}/auc5/ \
+    --exp_name ${PREFIX}/${SCENES}/auc6/ \
     --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
     --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
     --rgb_channels 64 --rgb_layers 2 \
-    --vs_seed 66985 \
+    --vs_seed 849607 \
     --ckpt_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \
     --pre_train_epoch 20 \
-    --val_only \
     --eval_u --u_by warp mcd_d mcd_r entropy --plot_roc \
     --theta 3 \
-    --vs_sample_rate 1.0
+    --vs_sample_rate 1.0 \
+#    --val_only
 
 #python train_nsvf.py \
 #    --root_dir ${ROOT_DIR}/Synthetic_NeRF/${SCENES} \
@@ -48,20 +48,20 @@ python train_nsvf.py \
 #    --theta 3 \
 #    --vs_sample_rate 0.2
 
-python train_nsvf.py \
-    --root_dir ${ROOT_DIR}/Synthetic_NeRF/${SCENES} \
-    --dataset_name nsvf \
-    --exp_name ${PREFIX}/${SCENES}/auc_sparse5/ \
-    --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
-    --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
-    --rgb_channels 64 --rgb_layers 2 \
-    --vs_seed 66985 \
-    --ckpt_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \
-    --pre_train_epoch 20 \
-    --val_only \
-    --eval_u --u_by warp mcd_d mcd_r entropy --plot_roc \
-    --theta 3 \
-    --vs_sample_rate 0.1
+#python train_nsvf.py \
+#    --root_dir ${ROOT_DIR}/Synthetic_NeRF/${SCENES} \
+#    --dataset_name nsvf \
+#    --exp_name ${PREFIX}/${SCENES}/auc_sparse5/ \
+#    --num_epochs 20 --batch_size 16384 --lr 2e-2 --eval_lpips \
+#    --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
+#    --rgb_channels 64 --rgb_layers 2 \
+#    --vs_seed 66985 \
+#    --ckpt_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \
+#    --pre_train_epoch 20 \
+#    --val_only \
+#    --eval_u --u_by warp mcd_d mcd_r entropy --plot_roc \
+#    --theta 3 \
+#    --vs_sample_rate 0.1
 
 done
 
