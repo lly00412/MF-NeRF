@@ -166,7 +166,7 @@ python train_nsvf.py \
     --start 15 \
     --vs_sample_rate 1.0 \
     --eval_u \
-#    --val_only \
-#    --ckpt_path ${BASE_DIR}/${SCENES}/auc/epoch=19.ckpt \
+    --val_only \
+    --ckpt_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \
 
 done

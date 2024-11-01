@@ -7,7 +7,7 @@ from tqdm import tqdm
 from .ray_utils import *
 from .color_utils import read_image
 from .colmap_utils import \
-    read_cameras_binary, read_images_binary, read_points3d_binary
+    read_cameras_binary, read_images_binary, read_points3d_binary, load_colmap_depth
 
 from .base import BaseDataset
 
@@ -170,6 +170,9 @@ class ColmapDataset(BaseDataset):
         print(f'Loading {len(img_paths)} {split} images ...')
         if split=='train':
             print(f'Training imgs are {self.subs}.')
+
+        # depth_gt = load_colmap_depth(self.root_dir,factor=int(1/self.downsample))
+        # breakpoint()
 
         for img_path in tqdm(img_paths):
             buf = [] # buffer for ray attributes: rgb, etc
