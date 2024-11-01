@@ -54,15 +54,16 @@ class ColmapDataset(BaseDataset):
         img_names = [imdata[k].name for k in imdata]
         perm = np.argsort(img_names)
 
-        if '360_v2' in self.root_dir and self.downsample<1: # mipnerf360 data
+        if '360' in self.root_dir and self.downsample<1: # mipnerf360 data
             folder = f'images_{int(1/self.downsample)}'
         else:
-            folder = 'images'
+            folder = 'images_copy'
         # read successfully reconstructed images and ignore others
-        if 'llff' in self.root_dir and self.downsample<1: # only has 4,8,16, downsample should be 0.25,0.125,0.0625
-            folder = f'images_{int(1/self.downsample)}'
-        else:
-            folder = 'images'
+        if 'llff' in self.root_dir:
+            if self.downsample<1: # only has 4,8,16, downsample should be 0.25,0.125,0.0625
+                folder = f'images_{int(1/self.downsample)}'
+            else:
+                folder = 'images'
 
         img_paths = [os.path.join(self.root_dir, folder, name)
                      for name in sorted(img_names)]
