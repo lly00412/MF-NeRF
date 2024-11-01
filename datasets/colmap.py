@@ -59,13 +59,18 @@ class ColmapDataset(BaseDataset):
         else:
             folder = 'images_copy'
         # read successfully reconstructed images and ignore others
-        if 'llff' in self.root_dir:
+        if ('llff' in self.root_dir) or ('LF' in self.root_dir):
             if self.downsample<1: # only has 4,8,16, downsample should be 0.25,0.125,0.0625
                 folder = f'images_{int(1/self.downsample)}'
             else:
                 folder = 'images'
-
-        img_paths = [os.path.join(self.root_dir, folder, name)
+        if ('LF' in self.root_dir) and self.downsample<1:
+            img_paths = []
+            for name in sorted(img_names):
+                name = os.path.splitext(name)[0] + ".png"
+                img_paths += [os.path.join(self.root_dir, folder, name)]
+        else:
+            img_paths = [os.path.join(self.root_dir, folder, name)
                      for name in sorted(img_names)]
 
         # if 'llff' in self.root_dir:

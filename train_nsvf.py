@@ -500,7 +500,6 @@ class NeRFSystem(LightningModule):
         thetas = [theta, -theta, theta, -theta]
         rot_ax = ['x', 'x', 'y', 'y']
         counts = 0
-
         vir_c2ws = Vcam.get_N_near_c2w(N=10,radiaus_ratio=0.05)
 
         # for theta, ax in zip(thetas, rot_ax):
@@ -509,6 +508,9 @@ class NeRFSystem(LightningModule):
             v_results = self.render_virtual_cam(new_c2w, batch)
             v_depth = v_results['depth'].cpu()
             v_opacity = v_results['opacity'].cpu()
+
+            # always render the whole images and then
+
 
             _, out_pix_idxs = warp_tgt_to_ref_sparse(results['depth'].cpu(), new_c2w[:3,:], batch['pose'],
                                                      K,
