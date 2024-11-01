@@ -257,6 +257,8 @@ def plot_roc(ROC_dict,fig_name, opt_label='rgb_err',intervals = 10):
     plt.rcParams.update({'font.size': 25})
     # plot opt
     ROC_opt = ROC_dict.pop(opt_label)
+    ymax = max(ROC_opt) * 1.2
+    ymin = 0. - max(ROC_opt) * 0.1
     plt.plot(quants, ROC_opt, marker="^", markersize=10, linewidth= 2,color='blue', label=method_dict[opt_label])
     for est in ROC_dict.keys():
         if est in method_dict.keys():
@@ -264,11 +266,17 @@ def plot_roc(ROC_dict,fig_name, opt_label='rgb_err',intervals = 10):
         else:
             est_name = f'theta = {est}'
         plt.plot(quants, ROC_dict[est], marker="o", markersize=10,linewidth= 2, label=est_name)
-    plt.xticks(quants)
+    xlabels = [100. / 10 * t for t in range(1, 10 + 1)]
+    plt.xticks(xlabels)
     plt.xlabel('Sample Size(%)')
-    plt.ylabel('Accumulative MSE')
+    plt.ylabel('AUSE')
+    plt.ylim([ymin,ymax])
     plt.legend()
     fig = plt.gcf()
-    fig.set_size_inches(12, 8)
+    fig.set_size_inches(20, 12)
     fig.savefig(fig_name)
     plt.close()
+
+
+
+

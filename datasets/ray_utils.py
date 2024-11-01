@@ -246,6 +246,13 @@ def transform_pose(c2w, translate, scale):
     c2w[:3, 3] = cam_center
     return c2w
 
+def inv_transform_pose(c2w, translate, scale):
+    cam_center = c2w[:3, 3]
+    cam_center = (cam_center / scale) - translate
+    c2w[:3, 3] = cam_center
+    return c2w
+
+
 def normalize_cams(poses, pts3d, target_radius=1.):
     # poses should be 4x4 c2w
     translate, scale = get_tf_cams(poses, target_radius=target_radius)

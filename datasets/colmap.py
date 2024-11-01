@@ -88,7 +88,7 @@ class ColmapDataset(BaseDataset):
         self.raw_poses = poses
         self.raw_pts3d = pts3d
 
-        self.translation, self.scale = get_tf_cams(poses, target_radius=1.0)
+        self.translate, self.scale_factor = get_tf_cams(poses, target_radius=1.0)
         self.poses, self.pts3d = normalize_cams(poses,pts3d)
 
         # self.poses, self.pts3d = center_poses(poses, pts3d)

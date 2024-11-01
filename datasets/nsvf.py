@@ -74,6 +74,9 @@ class NSVFDataset(BaseDataset):
                 c2w[:, 3] -= self.shift
                 c2w[:, 3] /= 2*self.scale # to bound the scene inside [-0.5, 0.5]
                 self.poses += [c2w]
+                self.translate = -self.shift
+                self.scale_factor = 1/(2*self.scale)
+
         else:
             if split == 'train': prefix = '0_'
             elif split == 'trainval': prefix = '[0-1]_'

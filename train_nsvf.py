@@ -359,7 +359,7 @@ class NeRFSystem(LightningModule):
             self.run_vs = True
             self.reweighted_samples = False
 
-        if (not self.hparams.view_select) and self.hparams.val_only:
+        if not self.hparams.view_select:
             self.no_save_test = self.hparams.no_save_test
             self.save_output = self.hparams.save_output
             self.run_vs = False
@@ -478,8 +478,10 @@ class NeRFSystem(LightningModule):
         if len(opacity) > len(pix_idxs):
             opacity = opacity[pix_idxs]
             warp_depths = [results['depth'][pix_idxs].cpu()]
+            warp_rgbs = [results['rgb'][pix_idxs].cpu()]
         else:
             warp_depths = [results['depth'].cpu()]
+            warp_rgbs = [results['rgb'].cpu()]
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         vargs = {'ref_c2w': batch['pose'].clone().cpu(),
@@ -490,44 +492,86 @@ class NeRFSystem(LightningModule):
                  'dense_map': isdense,
                  'pix_ids': results['pix_idxs'],
                  'img_h': img_h,
-                 'img_w': img_w}
+                 'img_w': img_w,
+                 'translate': self.train_dataset.translate,
+                 'scale': self.train_dataset.scale_factor}
 
         Vcam = GetVirtualCam(vargs)
         thetas = [theta, -theta, theta, -theta]
         rot_ax = ['x', 'x', 'y', 'y']
         counts = 0
 
-        for theta, ax in zip(thetas, rot_ax):
-            new_c2w = Vcam.get_near_c2w(batch['pose'].clone().cpu(), theta=theta, axis=ax)
+        vir_c2ws = Vcam.get_N_near_c2w(N=10,radiaus_ratio=0.05)
+
+        # for theta, ax in zip(thetas, rot_ax):
+        for new_c2w in vir_c2ws:
+            # new_c2w = Vcam.get_near_c2w(batch['pose'].clone().cpu(), theta=theta, axis=ax)
             v_results = self.render_virtual_cam(new_c2w, batch)
             v_depth = v_results['depth'].cpu()
             v_opacity = v_results['opacity'].cpu()
 
-            _, out_pix_idxs = warp_tgt_to_ref_sparse(results['depth'].cpu(), new_c2w, batch['pose'],
+            _, out_pix_idxs = warp_tgt_to_ref_sparse(results['depth'].cpu(), new_c2w[:3,:], batch['pose'],
                                                      K,
                                                      pix_idxs, (img_h, img_w), device)
             warp_depth = v_depth[out_pix_idxs.cpu()]
             warp_opacity = v_opacity[out_pix_idxs.cpu()]
 
+            warp_rgb = torch.zeros_like(v_results['rgb'])
+            warp_rgb[out_pix_idxs.cpu(), ...] = v_results['rgb'][out_pix_idxs.cpu(), ...]
+
             if not isdense:
                 warp_depth[out_pix_idxs == 0] = 0
                 # warp_depth[opacity == 0] = float('nan')
                 warp_depth[warp_opacity == 0] = 0
+                warp_rgb[(out_pix_idxs == 0), ...] = 0
+                warp_rgb[(warp_opacity == 0), ...] = 0
                 # counts += (out_pix_idxs.cpu() > 0) & (warp_opacity > 0)
                 counts += (warp_opacity > 0)
             else:
                 warp_depth[warp_depth == 0] = 0
                 # warp_depth[opacity == 0] = float('nan')
                 warp_depth[warp_opacity == 0] = 0
+                warp_rgb[(warp_depth == 0), ...] = 0
+                warp_rgb[(warp_opacity == 0), ...] = 0
                 # counts += (warp_depth.cpu() > 0) & (warp_opacity > 0)
                 counts += (warp_opacity > 0)
             warp_depth = warp_depth.cpu()
             warp_depths += [warp_depth]
+            warp_rgb = warp_rgb.cpu()
+            warp_rgbs += [warp_rgb]
+
+        # idx = 0
+        # warp_rgb_0 = warp_rgbs[1].detach().cpu().numpy()
+        # warp_rgb_0 = rearrange(warp_rgb_0, '(h w) c -> h w c', h=img_h)
+        # warp_rgb_0 = (warp_rgb_0* 255).astype(np.uint8)
+        # imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warp_rgb_0.png'), warp_rgb_0)
+        #
+        # vir_rgb_0 = self.render_virtual_cam(vir_c2ws[0], batch)['rgb']
+        # vir_rgb_0 = vir_rgb_0.detach().cpu().numpy()
+        # vir_rgb_0 = rearrange(vir_rgb_0, '(h w) c -> h w c', h=img_h)
+        # vir_rgb_0 = (vir_rgb_0 * 255).astype(np.uint8)
+        # imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_vir_rgb_0.png'), vir_rgb_0)
 
         warp_depths = torch.stack(warp_depths)
         # warp_sigmas = np.nanstd(warp_depths.cpu().numpy(), axis=0)
         # warp_sigmas = torch.from_numpy(warp_sigmas)
-        warp_sigmas = torch.std(warp_depths.cpu(), dim=0)
+        # warp_sigmas = torch.std(warp_depths.cpu(), dim=0)
+        vir_depth = torch.sum(warp_depths[1:,...],dim=0)
+        vir_depth[counts>.0] /= counts[counts>0.]
+        ref_depth = warp_depths[0]
+        ref_depth[counts<1.] = 0
+        warp_depth_sigmas = (ref_depth-vir_depth)**2
+        norm_depth_sigmas = (warp_depth_sigmas - warp_depth_sigmas.min()) / (warp_depth_sigmas.max() - warp_depth_sigmas.min())
+
+        warp_rgbs = torch.stack(warp_rgbs, dim=0)
+        vir_rgb = torch.sum(warp_rgbs[1:, ...], dim=0)
+        vir_rgb = vir_rgb.mean(-1)
+        vir_rgb[counts>.0] /= counts[counts>0.]
+        ref_rgb = warp_rgbs[0].mean(-1)
+        ref_rgb[counts<1.] = 0.
+        warp_rgb_sigmas = (ref_rgb-vir_rgb)**2
+        norm_rgb_sigmas = (warp_rgb_sigmas - warp_rgb_sigmas.min()) / (warp_rgb_sigmas.max() - warp_rgb_sigmas.min())
+        warp_sigmas = norm_rgb_sigmas + norm_depth_sigmas
 
         counts = (counts>0).cpu() & (opacity>0).cpu()
         warp_score = torch.mean(warp_sigmas[counts > 0].flatten())
@@ -804,18 +848,18 @@ class NeRFSystem(LightningModule):
 
                 val_err = rgb_err[pix_idxs][val_mask]
                 val_err = val_err.mean(-1).flatten().numpy()
-                ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(val_err, val_err)
+                ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(val_err, val_err,intervals=100)
 
                 for u_method in self.hparams.u_by:
                     sigmas = u_dict[u_method][val_mask].numpy()
-                    ROC_dict[u_method], AUC_dict[u_method] = compute_roc(val_err, sigmas)
+                    ROC_dict[u_method], AUC_dict[u_method] = compute_roc(val_err, sigmas, intervals=100)
 
 
             logs['ROC'] = ROC_dict.copy()
             logs['AUC'] = AUC_dict.copy()
 
             fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
-            plot_roc(ROC_dict, fig_name, opt_label='rgb_err')
+            plot_roc(ROC_dict, fig_name, opt_label='rgb_err',intervals=100)
 
             auc_log = os.path.join(self.val_dir, f'{img_id:03d}_auc.txt')
             with open(auc_log, 'a') as f:
@@ -904,19 +948,20 @@ class NeRFSystem(LightningModule):
         hdr = False if os.path.isfile(self.render_log) else True
         result_df.to_csv(self.render_log, mode='a', header=hdr)
 
-        if self.hparams.plot_roc:
+        if self.hparams.plot_roc and self.hparams.eval_u:
             ROCs = {}
             AUCs = {}
             ROCs['rgb_err'] = np.stack([x['ROC']['rgb_err'] for x in outputs]).mean(0)
             AUCs['rgb_err'] = np.array([x['AUC']['rgb_err'] for x in outputs]).mean(0)
 
             for u_method in self.hparams.u_by:
+                n_intervals = 100
                 ROCs[u_method] = np.stack([x['ROC'][u_method] for x in outputs]).mean(0)
                 # AUCs[u_method] = np.array([x['AUC'][u_method] for x in outputs]).mean(0)
-                AUCs[u_method] = np.trapz(ROCs[u_method], dx=1. / 10)
+                AUCs[u_method] = np.trapz(ROCs[u_method], dx=1. / n_intervals)
 
             fig_name = os.path.join(self.val_dir, f'scene_avg_roc.png')
-            plot_roc(ROCs, fig_name, opt_label='rgb_err')
+            plot_roc(ROCs, fig_name, opt_label='rgb_err',intervals=n_intervals)
 
             auc_log = os.path.join(self.val_dir, f'scene_avg_auc.txt')
             with open(auc_log, 'a') as f:
@@ -1075,6 +1120,9 @@ if __name__ == '__main__':
             system = NeRFSystem.load_from_checkpoint(hparams.ckpt_path, strict=False, hparams=hparams)
         else:
             system = NeRFSystem(hparams)
+
+        if ('mcd_r' in hparams.u_by) or ('mcd_d' in hparams.u_by):
+            system.model.dropout.p= hparams.p
 
         system.current_vs = current_vs
 
