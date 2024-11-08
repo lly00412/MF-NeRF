@@ -403,6 +403,30 @@ def compute_roc(opt,est,intervals = 10): # input numpy array
     AUC = np.trapz(ROC, dx=1. / intervals)
     return ROC,AUC
 
+def compute_ause(opt,est,intervals = 10): # input torch.tensor
+    quants = [100. / intervals * t for t in range(1, intervals + 1)]
+    thres = [np.percentile(est, q) for q in quants]
+
+    opt_roc = []
+    opt_subs = [opt <= t for t in thres]
+    opt_points = [opt[s].mean() if s.any() else 0.0 for s in opt_subs]
+    opt_roc.extend(opt_points)
+    opt_roc = np.array(opt_roc)
+
+    est_roc = []
+    est_subs = [est <= t for t in thres]
+    est_points = [opt[s].mean() if s.any() else 0.0 for s in est_subs]
+    est_roc.extend(est_points)
+    est_roc = np.array(est_roc)
+
+    max_val = opt_roc.max()
+    opt_roc_norm = opt_roc / max_val
+    est_roc_norm = est_roc / max_val
+    ause = np.trapz(np.abs(est_roc_norm-opt_roc_norm), dx=1.0 / intervals).item()
+
+    return est_roc,ause
+
+
 method_dict={
    'warp' : 'VS-NeRF',
     'mcd_d': 'MCD-Depth',

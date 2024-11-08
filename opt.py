@@ -95,6 +95,9 @@ def get_opts():
     parser.add_argument('--u_by', type=str, default=None, nargs='+',
                         choices=[None, 'warp', 'mcd_d', 'mcd_r','entropy','l2','grad'],
                         help='estimate uncertainty by warping / mcdropout depth / mcdropout rgb/ entropy')
+    parser.add_argument('--u_train', type=str, default=None,
+                        choices=[None, 'warp', 'mcd_d', 'mcd_r', 'entropy', 'l2', 'grad'],
+                        help='training uncertainty by warping / mcdropout depth / mcdropout rgb/ entropy')
     parser.add_argument('--plot_roc', action='store_true', default=False,
                         help='whether to plot roc of all estimation')
 

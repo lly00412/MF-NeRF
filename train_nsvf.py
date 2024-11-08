@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from opt import get_opts
+import torch
 import glob
 import imageio
 import numpy as np
@@ -326,6 +327,10 @@ class NeRFSystem(LightningModule):
                                            erode=self.hparams.dataset_name=='colmap')
 
         results = self(batch, split='train')
+        if self.hparams.loss in ['nll','nllc']:
+            u_type = self.hparams.u_train
+            results['beta'] = torch.log(results[u_type])
+
         loss_d = self.loss(results, batch)
         if self.hparams.use_exposure:
             zero_radiance = torch.zeros(1, 3, device=self.device)

@@ -58,7 +58,7 @@ class NeRFLoss(nn.Module):
         if self.loss_type=='nll': # always output log_sigma
             l2_loss = l2_loss.mean(-1)
             d['rgb'] = (l2_loss / (2 * results['beta'] ** 2)) + torch.log(results['beta'])
-            d['t_sigmas'] = self.lambda_u * results['transient_sigmas']
+            # d['t_sigmas'] = self.lambda_u * results['transient_sigmas']
 
         if self.loss_type=='nllc':
             l2_loss = l2_loss.mean(-1)
@@ -72,7 +72,7 @@ class NeRFLoss(nn.Module):
             # kl_loss = kl_loss[None,:].expand(l2_loss.size(0),-1)
             kl_loss = F.kl_div(beta_p.log(),rgb_p, reduction='sum')
             d['rgb'] = nll_loss+kl_loss
-            d['t_sigmas'] = self.lambda_u * results['transient_sigmas']
+            # d['t_sigmas'] = self.lambda_u * results['transient_sigmas']
 
         o = results['opacity']+1e-10
         # # encourage opacity to be either 0 or 1 to avoid floater
