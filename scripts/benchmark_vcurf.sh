@@ -149,13 +149,13 @@ do
 echo ${SCENES}
 
 #################### entropy
-
+#python train_nsvf.py \
 python train_vcurf.py \
     --root_dir ${ROOT_DIR}/LF/${SCENES} \
     --dataset_name colmap \
     --downsample 1.0 \
-    --exp_name ${PREFIX}/${SCENES}/ \
-    --num_epochs 20 --batch_size 2048 --scale 16.0 --lr 2e-2 --eval_lpips \
+    --exp_name ${PREFIX}/${SCENES}/debug/ \
+    --num_epochs 20 --batch_size 4096 --scale 16.0 --lr 2e-2 --eval_lpips \
     --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
     --rgb_channels 64 --rgb_layers 2 \
     --ray_sampling_strategy same_image \
@@ -168,6 +168,7 @@ python train_vcurf.py \
     --n_passes 10 --p 0.2 \
     --start 15 \
     --vs_sample_rate 1.0 \
+    --weight_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt
 #    --eval_u \
 #    --val_only \
 #    --ckpt_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \

@@ -383,16 +383,27 @@ class NGP_v2(nn.Module):
                 setattr(self, f'tonemapper_net_{i}', tonemapper_net)
 
         if hparams.u_train == 'warp':
-            self.beta_net = torch.nn.Sequential(
-                nn.Linear(4*hparams.n_vcam, 128,bias=False),
-                nn.ReLU(),
-                nn.Linear(128, 128,bias=False),
-                nn.ReLU(),
-                nn.Linear(128, 128,bias=False),
-                nn.ReLU(),
-                nn.Dropout(p=0.2),
-                nn.Linear(128, 1,bias=False),
-            )
+            # self.beta_net = torch.nn.Sequential(
+            #     nn.Linear(4*hparams.n_vcam, 128,bias=False),
+            #     nn.ReLU(),
+            #     nn.Linear(128, 128,bias=False),
+            #     nn.ReLU(),
+            #     nn.Linear(128, 128,bias=False),
+            #     nn.ReLU(),
+            #     nn.Dropout(p=0.2),
+            #     nn.Linear(128, 1,bias=False),
+            # )
+
+            self.beta_net = tcnn.Network(
+                        n_input_dims=4*hparams.n_vcam, n_output_dims=1,
+                        network_config={
+                            "otype": "FullyFusedMLP",
+                            "activation": "ReLU",
+                            "output_activation": "None",
+                            "n_neurons": 64,
+                            "n_hidden_layers": 1,
+                        }
+                    )
 
     def compute_beta(self,diff):
         betas = self.beta_net(diff)
@@ -449,7 +460,8 @@ class NGP_v2(nn.Module):
         sigmas, h = self.density(x, return_feat=True)
         d = d / torch.norm(d, dim=1, keepdim=True)
         d = self.dir_encoder((d + 1) / 2)
-        rgbs = self.rgb_net(torch.cat([d, h], 1))
+        x = torch.cat([d, h], 1)
+        rgbs = self.rgb_net(x)
         # rgbs = self.rgb_out(rgbs)
         rgbs = self.rgb_act(rgbs)
 

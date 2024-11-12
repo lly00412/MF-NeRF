@@ -178,6 +178,7 @@ def __render_rays_test_sparse(model, rays_o, rays_d, hits_t, **kwargs):
     for k, v in kwargs.items(): # supply additional inputs, repeated per ray
         if isinstance(v, torch.Tensor):
             kwargs[k] = torch.repeat_interleave(v[rays_a[:, 0]], rays_a[:, 2], 0)
+
     sigmas, rgbs = model(xyzs, dirs, **kwargs)
 
     sigmas = sigmas.to(torch.float32)
@@ -236,6 +237,12 @@ def __render_rays_train(model, rays_o, rays_d, hits_t, **kwargs):
     for k, v in kwargs.items(): # supply additional inputs, repeated per ray
         if isinstance(v, torch.Tensor):
             kwargs[k] = torch.repeat_interleave(v[rays_a[:, 0]], rays_a[:, 2], 0)
+
+
+    if torch.cuda.is_available():
+        print(f"Total CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1024 ** 2:.2f} MB")
+        print(f"Available CUDA memory: {torch.cuda.mem_get_info()[0] / 1024 ** 2:.2f} MB")
+
     sigmas, rgbs = model(xyzs, dirs, **kwargs)
 
     (results['vr_samples'], results['opacity'],

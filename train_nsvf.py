@@ -472,7 +472,7 @@ class NeRFSystem(LightningModule):
         entropy_score = torch.nanmean(entropys[counts].flatten())
         return entropys.cpu(), counts.cpu(), entropy_score.cpu()
 
-    def warp_uncert(self, batch, results, img_h, img_w, K, theta, isdense=True):
+    def warp_uncert(self, batch, results, img_h, img_w, K, nvcam=10, r_scale=0.05, isdense=True):
         opacity = results['opacity'].cpu()  # (n_rays)
         if self.hparams.vs_sample_rate < 1:
             pix_idxs = results['pix_idxs']
@@ -502,10 +502,8 @@ class NeRFSystem(LightningModule):
                  'scale': self.train_dataset.scale_factor}
 
         Vcam = GetVirtualCam(vargs)
-        thetas = [theta, -theta, theta, -theta]
-        rot_ax = ['x', 'x', 'y', 'y']
         counts = 0
-        vir_c2ws = Vcam.get_N_near_c2w(N=10,radiaus_ratio=0.05)
+        vir_c2ws = Vcam.get_N_near_c2w(N=nvcam,radiaus_ratio=r_scale)
 
         # for theta, ax in zip(thetas, rot_ax):
         for new_c2w in vir_c2ws:
@@ -632,7 +630,7 @@ class NeRFSystem(LightningModule):
         if self.hparams.vs_by == 'warp':
             K = self.handout_dataset.K
             sigmas, counts, u_score = self.warp_uncert(batch, results,
-                                                       img_h, img_w, K, self.hparams.theta,
+                                                       img_h, img_w, K, self.hparams.n_vcam, self.hparams.r_scale,
                                                         isdense=not (self.hparams.vs_sample_rate<1))
             counts = counts.to(torch.long)
         if self.hparams.vs_by in ['mcd_d', 'mcd_r']:
@@ -694,7 +692,7 @@ class NeRFSystem(LightningModule):
         if self.hparams.vs_by == 'warp':
             K = self.train_dataset.K
             _, _, u_score = self.warp_uncert(batch, results,
-                                             img_h, img_w, K, self.hparams.theta,
+                                             img_h, img_w, K, self.hparams.n_vcam, self.hparams.r_scale,
                                              isdense=not (self.hparams.vs_sample_rate < 1))
         if self.hparams.vs_by == 'entropy':
             _, _, u_score = self.entropy_uncert(results,isdense=not (self.hparams.vs_sample_rate < 1))
@@ -787,7 +785,7 @@ class NeRFSystem(LightningModule):
                 if u_method == 'warp':
                     K = self.test_dataset.K
                     sigmas, counts, u_score = self.warp_uncert(batch, results,
-                                                               img_h, img_w, K, self.hparams.theta,
+                                                               img_h, img_w, K, self.hparams.n_vcam, self.hparams.r_scale,
                                                                isdense=dense_tag)
                 if u_method in ['mcd_d', 'mcd_r']:
                     mcd_val = 'depth' if u_method == 'mcd_d' else 'rgb'

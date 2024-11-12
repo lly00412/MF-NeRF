@@ -121,6 +121,7 @@ class NeRFSystem(LightningModule):
             self.vs_epochs = [0]+[self.hparams.epoch_step*i-1 for i in range(1,self.hparams.N_vs)]
         self.current_vs = 0
         self.reweighted_samples = False
+        # self.automatic_optimization = False
 
     def forward(self, batch, split, isvs=False):
         if split=='train':
@@ -325,28 +326,30 @@ class NeRFSystem(LightningModule):
             self.model.update_density_grid(0.01*MAX_SAMPLES/3**0.5,
                                            warmup=self.global_step<self.warmup_steps,
                                            erode=self.hparams.dataset_name=='colmap')
-
+        # sch = self.lr_schedulers()
+        # opt = self.optimizers()
         results = self(batch, split='train')
 
-        if self.global_step<= 5000:
-            self.loss = NeRFLoss(lambda_distortion=self.hparams.distortion_loss_w,loss_type='l2')
-        else:
-            self.loss = NeRFLoss(lambda_distortion=self.hparams.distortion_loss_w, loss_type=self.hparams.loss)
+        # if self.global_step<= 500:
+        #     self.loss = NeRFLoss(lambda_distortion=self.hparams.distortion_loss_w,loss_type='l2')
+        # else:
+        #     self.loss = NeRFLoss(lambda_distortion=self.hparams.distortion_loss_w, loss_type=self.hparams.loss)
 
-        if self.hparams.loss in ['nll', 'nllc'] and self.global_step > 5000:
+        if self.hparams.loss in ['nll', 'nllc']:
             if self.hparams.u_train == 'warp':
                 K = self.train_dataset.K
                 img_w, img_h = self.train_dataset.img_wh
-                diff = self.warp_diff(batch, results,img_h, img_w, K,
+                diff, mask = self.warp_diff(batch, results,img_h, img_w, K,
                                       nvcam = self.hparams.n_vcam, r_scale = self.hparams.r_scale,
                                       istrain=True)
                 diff = diff.permute(1,0,2).reshape(-1, 4*self.hparams.n_vcam)
-                # diff_ = torch.rand(diff.shape, requires_grad=True).to(diff.device)
-                betas = self.model.compute_beta(diff)
+                betas = self.model.compute_beta(diff[mask,...])
                 results['beta'] = betas.squeeze()
+                results['seen'] = mask
             else:
                 u_type = self.hparams.u_train
                 results['beta'] = results[u_type]
+                results['seen'] = (results[u_type] != 0.)
 
         torch.autograd.set_detect_anomaly(True)
 
@@ -359,6 +362,10 @@ class NeRFSystem(LightningModule):
                 0.5*(unit_exposure_rgb-self.train_dataset.unit_exposure_rgb)**2
         loss = sum(lo.mean() for lo in loss_d.values())
 
+        # for k in loss_d.keys():
+        #     lo = loss_d[k].mean()
+        #     print(f'loss {k}: {lo}')
+
         with torch.no_grad():
             self.train_psnr(results['rgb'], batch['rgb'])
         self.log('lr', self.net_opt.param_groups[0]['lr'])
@@ -368,6 +375,16 @@ class NeRFSystem(LightningModule):
         # volume rendering samples per ray (stops marching when transmittance drops below 1e-4)
         self.log('train/vr_s', results['vr_samples']/len(batch['rgb']), True)
         self.log('train/psnr', self.train_psnr, True)
+
+        # opt.zero_grad()
+        # self.manual_backward(loss_d['rgb'].mean())
+        #
+        # self.clip_gradients(opt, gradient_clip_val=10, gradient_clip_algorithm="norm")
+        #
+        # opt.step()
+        # sch.step()
+
+
 
         return loss
 
@@ -501,6 +518,7 @@ class NeRFSystem(LightningModule):
     def beta_uncert(self, results, isdense=True):
         pix_ids = results['pix_idxs']
         opacity = results['opacity'].cpu()
+
         betas = results['beta'].cpu()  # (n_rays)
         if not isdense:
             if len(opacity) > len(pix_ids):
@@ -559,7 +577,7 @@ class NeRFSystem(LightningModule):
             # always render the whole images and then
 
 
-            _, out_pix_idxs = warp_tgt_to_ref_sparse(results['depth'].cpu(), new_c2w[:3,:], batch['pose'],
+            _, out_pix_idxs, valid_mask = warp_tgt_to_ref_sparse(results['depth'].cpu(), new_c2w[:3,:], batch['pose'],
                                                      K,
                                                      pix_idxs, (img_h, img_w), device)
             warp_depth = v_depth[out_pix_idxs.cpu()]
@@ -627,7 +645,9 @@ class NeRFSystem(LightningModule):
         return warp_sigmas.cpu(), counts.cpu(), warp_score.cpu()
 
     def warp_diff(self, batch, results, img_h, img_w, K, nvcam=10, r_scale=0.05, istrain=False):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         opacity = results['opacity'].cpu()  # (n_rays)
+
         if istrain:
             isdense = False
             pix_idxs = batch['pix_idxs']
@@ -639,15 +659,21 @@ class NeRFSystem(LightningModule):
                 isdense = True
                 pix_idxs = torch.arange(img_h * img_w)
 
+
         if len(opacity) > len(pix_idxs):
             opacity = opacity[pix_idxs]
-            warp_depths = [results['depth'][pix_idxs]]
-            warp_rgbs = [results['rgb'][pix_idxs]]
+            surface = (opacity > 0.5)
+            ref_depth = results['depth'][pix_idxs].cpu()
+            ref_rgb = results['rgb'][pix_idxs].cpu()
         else:
-            warp_depths = [results['depth']]
-            warp_rgbs = [results['rgb']]
+            surface = (opacity > 0.5)
+            ref_depth = results['depth'].cpu()
+            ref_rgb = results['rgb'].cpu()
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        warp_depths = []
+        warp_rgbs = []
+
         vargs = {'ref_c2w': batch['pose'].clone().cpu(),
                  'K': K.clone().cpu(),
                  'device': device,
@@ -666,35 +692,36 @@ class NeRFSystem(LightningModule):
         vir_c2ws = Vcam.get_N_near_c2w(N=nvcam,radiaus_ratio=r_scale)
 
         for new_c2w in vir_c2ws:
-            torch.cuda.empty_cache()
-            out_pix_idxs = warp_tgt_to_ref_sparse_v2(results['depth'], new_c2w[:3,:], batch['pose'],
+            _,out_pix_idxs, valid_mask = warp_tgt_to_ref_sparse(results['depth'], new_c2w[:3,:], batch['pose'],
                                                      K,
                                                      pix_idxs, (img_h, img_w), device)
             # TODO: for testing, it should be different
+            torch.cuda.empty_cache()
             v_results = self.render_virtual_cam_train(new_c2w, batch, out_pix_idxs)
-            warp_depth = v_results['depth']
-            warp_opacity = v_results['opacity']
-            warp_rgb = v_results['rgb']
+            warp_depth = v_results['depth'].cpu().clone()
+            warp_rgb = v_results['rgb'].cpu().clone()
 
-            # warp_depth[warp_opacity == 0] = 0
-            # warp_rgb[(warp_depth == 0), ...] = 0
-            # warp_rgb[(warp_opacity == 0), ...] = 0
-            counts = counts + (warp_opacity > 0)
+            del v_results
+
+            counts = counts + valid_mask.float()
 
             warp_depths.append(warp_depth)
             warp_rgbs.append(warp_rgb)
 
+        mask = (counts>5) & (results['opacity']>0.5)
         warp_depths = torch.stack(warp_depths)
         warp_rgbs = torch.stack(warp_rgbs)
 
-        ref_depths = warp_depths[0][...,None].repeat(nvcam,1,1)
-        ref_rgbs = warp_rgbs[0].repeat(nvcam, 1, 1)
+        ref_depths = ref_depth[...,None].repeat(nvcam,1,1)
+        ref_rgbs = ref_rgb.repeat(nvcam, 1, 1)
 
-        depth_l2 = (warp_depths[1:,...][...,None] - ref_depths) **2
-        rgb_l2 = (warp_rgbs[1:,...] - ref_rgbs) **2
+        depth_l2 = (warp_depths[...,None] - ref_depths) **2
+        rgb_l2 = (warp_rgbs - ref_rgbs) **2
 
         diff = torch.cat([depth_l2, rgb_l2], dim=-1)
-        return diff
+        diff = diff / torch.norm(diff,dim=-1,keepdim=True)
+
+        return diff.to(device), mask
 
     def mcd_uncert(self, batch, mcd_val='depth', pix_idxs=None, isdense=True):
         enable_dropout(self.model.dropout, p=self.hparams.p)
