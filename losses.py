@@ -57,7 +57,9 @@ class NeRFLoss(nn.Module):
 
         if self.loss_type=='nll': # always output log_sigma
             l2_loss = l2_loss.mean(-1)
-            d['rgb'] = (l2_loss / (2 * results['beta'] ** 2)) + torch.log(results['beta'])
+            results['beta'] = results['beta']
+            print(results['beta'].max())
+            d['rgb'] = (l2_loss / (2 * torch.exp(results['beta']))) + results['beta']/2
             # d['t_sigmas'] = self.lambda_u * results['transient_sigmas']
 
         if self.loss_type=='nllc':

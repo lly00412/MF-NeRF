@@ -181,7 +181,7 @@ class GetVirtualCam:
             new_c2w[:3, :3] = new_R
             new_c2w[:3, 3] = new_T
 
-            new_c2w = transform_pose(new_c2w, self.translate,self.scale)
+            new_c2w = transform_pose(new_c2w, torch.from_numpy(self.translate).to(new_c2w.device),self.scale)
             vir_c2ws.append(new_c2w)
 
         return vir_c2ws

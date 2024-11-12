@@ -36,7 +36,7 @@ class BaseDataset(Dataset):
             pix_idxs = np.random.choice(self.img_wh[0]*self.img_wh[1], self.batch_size, replace=False)
             rays = self.rays[img_idxs, pix_idxs]
             sample = {'img_idxs': img_idxs, 'pix_idxs': pix_idxs,
-                      'rgb': rays[:, :3]}
+                      'rgb': rays[:, :3], 'pose': self.poses[img_idxs]}
             if self.rays.shape[-1] == 4: # HDR-NeRF data
                 sample['exposure'] = rays[:, 3:]
         else:

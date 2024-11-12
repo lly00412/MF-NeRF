@@ -93,11 +93,11 @@ def get_opts():
     parser.add_argument('--eval_u', action='store_true', default=False,
                         help='whether to compute uncertainty')
     parser.add_argument('--u_by', type=str, default=None, nargs='+',
-                        choices=[None, 'warp', 'mcd_d', 'mcd_r','entropy','l2','grad'],
+                        choices=[None, 'warp', 'mcd_d', 'mcd_r','entropy','l2','grad', 'beta'],
                         help='estimate uncertainty by warping / mcdropout depth / mcdropout rgb/ entropy')
     parser.add_argument('--u_train', type=str, default=None,
-                        choices=[None, 'warp', 'mcd_d', 'mcd_r', 'entropy', 'l2', 'grad'],
-                        help='training uncertainty by warping / mcdropout depth / mcdropout rgb/ entropy')
+                        choices=[None, 'warp', 'entropy'],
+                        help='training uncertainty by warping / entropy')
     parser.add_argument('--plot_roc', action='store_true', default=False,
                         help='whether to plot roc of all estimation')
 
@@ -108,8 +108,12 @@ def get_opts():
                         help='drop prob for mc_dropout')
 
     # warp settings
-    parser.add_argument("--theta", type=int, default=1,
-                        help='number of passes for mc_dropout')
+    # parser.add_argument("--theta", type=int, default=1,
+    #                     help='number of passes for mc_dropout')
+    parser.add_argument("--n_vcam", type=int, default=10,
+                                        help='number of virtual cameras')
+    parser.add_argument("--r_scale", type=float, default=0.05,
+                        help='depth ratio scale for sampling')
 
 
     # validation options

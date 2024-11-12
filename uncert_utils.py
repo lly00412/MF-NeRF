@@ -2,6 +2,7 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn as nn
+from typing import Tuple
 
 def enable_dropout(model,p=0.2):
     """ Function to enable the dropout layers during test-time """
@@ -277,7 +278,9 @@ def warp_tgt_to_ref_sparse(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, 
 
     depth_map = tgt_depth.clone()  # (N_rays)
     if len(depth_map)> len(pixl_ids):
-        depth_map = depth_map[pixl_ids]
+        depth_map = tgt_depth[pixl_ids]
+    else:
+        depth_map = tgt_depth
 
     height, width = img_shape
     n_rays = depth_map.shape[0]
@@ -321,11 +324,16 @@ def warp_tgt_to_ref_sparse(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, 
     P_tgt = P_tgt.to(device)
     K_tgt = K_tgt.to(device)
 
-    bwd_proj = torch.matmul(torch.inverse(P_tgt), torch.inverse(K_tgt)).to(torch.float32)
-    fwd_proj = torch.matmul(K_ref, P_ref).to(torch.float32)
+    #bwd_proj = torch.matmul(torch.inverse(P_tgt), torch.inverse(K_tgt)).to(torch.float32)
+    # fwd_proj = torch.matmul(K_ref, P_ref).to(torch.float32)
+    bwd_proj = torch.inverse(P_tgt) @ torch.inverse(K_tgt)
+    fwd_proj = K_ref @ P_ref
+    # breakpoint()
     bwd_rot = bwd_proj[:3, :3]
     bwd_trans = bwd_proj[:3, 3:4]
-    proj = torch.matmul(fwd_proj, bwd_proj)
+    # proj = torch.matmul(fwd_proj, bwd_proj)
+    proj = fwd_proj @ bwd_proj
+    proj = proj.to(torch.float32)
     rot = proj[:3, :3]
     trans = proj[:3, 3:4]
 
@@ -338,14 +346,16 @@ def warp_tgt_to_ref_sparse(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, 
     homog = homog[..., pixl_ids] # (N_rays, 3)
 
     # get world coords
-    world_coords = torch.matmul(bwd_rot, homog)  # (N_rays, 3)
+    # world_coords = torch.matmul(bwd_rot, homog)  # (N_rays, 3)
+    world_coords = bwd_rot @ homog
     world_coords = world_coords * depth_map.reshape(1, -1)
     world_coords = world_coords + bwd_trans.reshape(3, 1)
     world_coords = torch.movedim(world_coords, 0, 1)  # (N_rays, 3)
     # world_coords = world_coords.reshape(height, width, 3)
 
     # get pixel projection
-    rot_coords = torch.matmul(rot, homog)
+    # rot_coords = torch.matmul(rot, homog)
+    rot_coords = rot @ homog
     proj_3d = rot_coords * depth_map.reshape(1, -1)
     proj_3d = proj_3d + trans.reshape(3, 1)
     proj_2d = proj_3d[:2, :] / proj_3d[2:3, :]
@@ -354,7 +364,8 @@ def warp_tgt_to_ref_sparse(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, 
 
     # compute projected depth
     proj_depth = torch.sub(world_coords, C_ref).unsqueeze(-1)
-    proj_depth = torch.matmul(z_ref, proj_depth)
+    # proj_depth = torch.matmul(z_ref, proj_depth)
+    proj_depth = z_ref @ proj_depth
     proj_depth = proj_depth.reshape(-1, 1)
 
     # mask out invalid indices
@@ -392,6 +403,95 @@ def warp_tgt_to_ref_sparse(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, 
     # proj_2d[:, 1] = torch.where(proj_2d[:, 1] < 0, 0, proj_2d[:, 1])
 
     return warped_depth, pixl_ids.long()
+
+def warp_tgt_to_ref_sparse_v2(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, device='cpu'):
+    torch.cuda.empty_cache()
+
+    depth_map = tgt_depth.clone()  # (N_rays)
+    if len(depth_map)> len(pixl_ids):
+        depth_map = tgt_depth[pixl_ids]
+    else:
+        depth_map = tgt_depth
+
+    height, width = img_shape
+    n_rays = depth_map.shape[0]
+
+    K_homo = torch.eye(4)
+    K_homo[:3,:3] = K.clone().cpu()
+
+    rc2w = torch.eye(4)
+    rc2w[:3] = ref_c2w.clone().cpu()
+    rw2c = torch.inverse(rc2w)
+
+    tc2w = torch.eye(4)
+    tc2w[:3] = tgt_c2w.clone().cpu()
+    tw2c = torch.inverse(tc2w)
+
+    # warp tgt depth map to ref view
+    # grab intrinsics and extrinsics from reference view
+    P_ref = rw2c.to(torch.float32) # 4x4
+    K_ref = K_homo.clone().to(torch.float32) # 4x4
+
+    P_ref = P_ref.to(device)
+    K_ref = K_ref.to(device)
+
+    R_ref = P_ref[:3, :3] # 3x3
+    t_ref = P_ref[:3, 3:4] # 3x1
+
+    C_ref = torch.matmul(-R_ref.transpose(0, 1), t_ref)
+    # z_ref = R_ref[2:3, :3].reshape(1, 1, 1, 3).repeat(height, width, 1, 1)
+    # C_ref = C_ref.reshape(1, 1, 3).repeat(height, width, 1)
+
+    z_ref = R_ref[2:3, :3].reshape(1, 1, 3).repeat(n_rays, 1, 1)
+    C_ref = C_ref.reshape(1, 3).repeat(n_rays, 1)
+
+    depth_map = depth_map.to(device)  # h,w
+
+    # get intrinsics and extrinsics from target view
+    P_tgt = tw2c.to(torch.float32)  #  4x4
+    K_tgt = K_homo.clone().to(torch.float32)  #  4x4
+
+    P_tgt = P_tgt.to(device)
+    K_tgt = K_tgt.to(device)
+
+    #bwd_proj = torch.matmul(torch.inverse(P_tgt), torch.inverse(K_tgt)).to(torch.float32)
+    # fwd_proj = torch.matmul(K_ref, P_ref).to(torch.float32)
+    bwd_proj = torch.inverse(P_tgt) @ torch.inverse(K_tgt)
+    fwd_proj = K_ref @ P_ref
+    # breakpoint()
+    bwd_rot = bwd_proj[:3, :3]
+    bwd_trans = bwd_proj[:3, 3:4]
+    # proj = torch.matmul(fwd_proj, bwd_proj)
+    proj = fwd_proj @ bwd_proj
+    proj = proj.to(torch.float32)
+    rot = proj[:3, :3]
+    trans = proj[:3, 3:4]
+
+    y, x = torch.meshgrid([torch.arange(0, height, dtype=torch.float32),
+                           torch.arange(0, width, dtype=torch.float32)],
+                          indexing='ij')
+    y, x = y.contiguous(), x.contiguous()
+    y, x = y.reshape(height * width), x.reshape(height * width)
+    homog = torch.stack((x, y, torch.ones_like(x))).to(bwd_rot)
+    homog = homog[..., pixl_ids] # (N_rays, 3)
+
+    bwd_proj_tgt = torch.inverse(K_tgt[:3,:3]) @ homog
+    proj_3d = bwd_proj_tgt * depth_map
+    ones = torch.ones_like(depth_map).unsqueeze(0)
+    proj_3d_homo = torch.cat([proj_3d, ones], 0)
+    tgt_to_ref = torch.inverse(P_ref) @ P_tgt @ proj_3d_homo
+    fwd_proj_ref = K_ref @ tgt_to_ref
+    proj_2d = fwd_proj_ref[:3,...]
+    proj_2d[:2,...] = proj_2d[:2, ...] / proj_2d[2:3, ...]
+
+    proj_2d = proj_2d.long()
+    proj_2d[0, :] = torch.where(proj_2d[0, :] >= width, width-1, proj_2d[0, :])
+    proj_2d[0, :] = torch.where(proj_2d[0, :] < 0, 0, proj_2d[0, :])
+    proj_2d[1, :] = torch.where(proj_2d[1, :] >= height, height-1, proj_2d[1, :])
+    proj_2d[1, :] = torch.where(proj_2d[1, :] < 0, 0, proj_2d[1, :])
+    pixl_ids = proj_2d[0, :] * height + proj_2d[1, :]
+
+    return pixl_ids
 
 def compute_roc(opt,est,intervals = 10): # input numpy array
     ROC = []
