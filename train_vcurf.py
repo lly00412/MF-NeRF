@@ -328,12 +328,12 @@ class NeRFSystem(LightningModule):
 
         results = self(batch, split='train')
 
-        if self.global_step<= 500:
+        if self.global_step<= 5000:
             self.loss = NeRFLoss(lambda_distortion=self.hparams.distortion_loss_w,loss_type='l2')
         else:
             self.loss = NeRFLoss(lambda_distortion=self.hparams.distortion_loss_w, loss_type=self.hparams.loss)
 
-        if self.hparams.loss in ['nll', 'nllc'] and self.global_step > 500:
+        if self.hparams.loss in ['nll', 'nllc'] and self.global_step > 5000:
             if self.hparams.u_train == 'warp':
                 K = self.train_dataset.K
                 img_w, img_h = self.train_dataset.img_wh
@@ -343,7 +343,6 @@ class NeRFSystem(LightningModule):
                 diff = diff.permute(1,0,2).reshape(-1, 4*self.hparams.n_vcam)
                 # diff_ = torch.rand(diff.shape, requires_grad=True).to(diff.device)
                 betas = self.model.compute_beta(diff)
-                betas = torch.where(betas < .01, .01, betas)
                 results['beta'] = betas.squeeze()
             else:
                 u_type = self.hparams.u_train
