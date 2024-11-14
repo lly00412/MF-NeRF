@@ -121,7 +121,7 @@ class NeRFSystem(LightningModule):
             self.vs_epochs = [0]+[self.hparams.epoch_step*i-1 for i in range(1,self.hparams.N_vs)]
         self.current_vs = 0
         self.reweighted_samples = False
-        # self.automatic_optimization = False
+        self.automatic_optimization = False
 
     def forward(self, batch, split, isvs=False):
         if split=='train':
@@ -326,8 +326,8 @@ class NeRFSystem(LightningModule):
             self.model.update_density_grid(0.01*MAX_SAMPLES/3**0.5,
                                            warmup=self.global_step<self.warmup_steps,
                                            erode=self.hparams.dataset_name=='colmap')
-        # sch = self.lr_schedulers()
-        # opt = self.optimizers()
+        sch = self.lr_schedulers()
+        opt = self.optimizers()
         results = self(batch, split='train')
 
         # if self.global_step<= 500:
@@ -376,13 +376,17 @@ class NeRFSystem(LightningModule):
         self.log('train/vr_s', results['vr_samples']/len(batch['rgb']), True)
         self.log('train/psnr', self.train_psnr, True)
 
-        # opt.zero_grad()
-        # self.manual_backward(loss_d['rgb'].mean())
-        #
-        # self.clip_gradients(opt, gradient_clip_val=10, gradient_clip_algorithm="norm")
-        #
-        # opt.step()
-        # sch.step()
+        opt.zero_grad()
+        self.manual_backward(loss)
+        # parameters_to_clip = []
+        # for params in self.model.parameters():
+        #         parameters_to_clip.append(params)
+        # torch.nn.utils.clip_grad_norm_(parameters_to_clip, max_norm=0.5)
+
+        self.clip_gradients(opt, gradient_clip_val=0.5, gradient_clip_algorithm="norm")
+
+        opt.step()
+        sch.step()
 
 
 

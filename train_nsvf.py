@@ -545,18 +545,6 @@ class NeRFSystem(LightningModule):
             warp_rgb = warp_rgb.cpu()
             warp_rgbs += [warp_rgb]
 
-        # idx = 0
-        # warp_rgb_0 = warp_rgbs[1].detach().cpu().numpy()
-        # warp_rgb_0 = rearrange(warp_rgb_0, '(h w) c -> h w c', h=img_h)
-        # warp_rgb_0 = (warp_rgb_0* 255).astype(np.uint8)
-        # imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_warp_rgb_0.png'), warp_rgb_0)
-        #
-        # vir_rgb_0 = self.render_virtual_cam(vir_c2ws[0], batch)['rgb']
-        # vir_rgb_0 = vir_rgb_0.detach().cpu().numpy()
-        # vir_rgb_0 = rearrange(vir_rgb_0, '(h w) c -> h w c', h=img_h)
-        # vir_rgb_0 = (vir_rgb_0 * 255).astype(np.uint8)
-        # imageio.imsave(os.path.join(self.val_dir, f'{idx:03d}_vir_rgb_0.png'), vir_rgb_0)
-
         warp_depths = torch.stack(warp_depths)
         # warp_sigmas = np.nanstd(warp_depths.cpu().numpy(), axis=0)
         # warp_sigmas = torch.from_numpy(warp_sigmas)
@@ -828,17 +816,27 @@ class NeRFSystem(LightningModule):
                 for u_method in self.hparams.u_by:
                     sigmas = u_dict[u_method]
                     if not self.no_save_test:
-                        sigmas = u2img(sigmas[val_mask].cpu().numpy())  # (n_rays) 1 3
-                        sigmas = sigmas.squeeze(1)
-                        counts = val_mask.cpu().numpy()
-                        u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
+                        sigmas_ = sigmas[val_mask].cpu().numpy()  # (n_rays) 1 3
+                        u_img = np.zeros((img_h * img_w))
                         if self.hparams.vs_sample_rate < 1:
-                            u_img[results['pix_idxs'].cpu().numpy()[counts>0]] = sigmas
-                            u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
+                            u_img[results['pix_idxs'].cpu().numpy()[val_mask]] = sigmas_
+                            # u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
                         else:
-                            u_img[counts>0] = sigmas
-                            u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
-                        imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{u_method}_u.png'), u_img)
+                            u_img[val_mask] = sigmas_
+                        np.save(os.path.join(self.val_dir, f'{img_id:03d}_{u_method}_u.npy'), u_img, allow_pickle=True)
+
+                        # sigmas = u2img(sigmas[val_mask].cpu().numpy())  # (n_rays) 1 3
+                        # sigmas = sigmas.squeeze(1)
+                        # counts = val_mask.cpu().numpy()
+                        # u_img = np.zeros((img_h * img_w, 3)).astype(np.uint8)
+                        # if self.hparams.vs_sample_rate < 1:
+                        #     u_img[results['pix_idxs'].cpu().numpy()[counts>0]] = sigmas
+                        #     u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
+                        # else:
+                        #     u_img[counts>0] = sigmas
+                        #     u_img = rearrange(u_img, '(h w) c -> h w c', h=img_h)
+                        # imageio.imsave(os.path.join(self.val_dir, f'{img_id:03d}_{u_method}_u.png'), u_img)
+
 
             if self.hparams.plot_roc:
                 if self.hparams.vs_sample_rate < 1:
@@ -860,20 +858,20 @@ class NeRFSystem(LightningModule):
                     ROC_dict[u_method], AUC_dict[u_method] = compute_roc(val_err, sigmas, intervals=100)
 
 
-            logs['ROC'] = ROC_dict.copy()
-            logs['AUC'] = AUC_dict.copy()
+                logs['ROC'] = ROC_dict.copy()
+                logs['AUC'] = AUC_dict.copy()
 
-            fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
-            plot_roc(ROC_dict, fig_name, opt_label='rgb_err',intervals=100)
+                fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
+                plot_roc(ROC_dict, fig_name, opt_label='rgb_err',intervals=100)
 
-            auc_log = os.path.join(self.val_dir, f'{img_id:03d}_auc.txt')
-            with open(auc_log, 'a') as f:
-                f.write(f'common pixels = {val_mask.sum()}\n')
-                for u_method in self.hparams.u_by:
-                    if u_method in ['mcd_d', 'mcd_r']:
-                        f.write(f'{u_method} params: \n')
-                        f.write(f'n_passes = {self.hparams.n_passes}\n')
-                        f.write(f'drop prob = {self.hparams.p}\n')
+                auc_log = os.path.join(self.val_dir, f'{img_id:03d}_auc.txt')
+                with open(auc_log, 'a') as f:
+                    f.write(f'common pixels = {val_mask.sum()}\n')
+                    for u_method in self.hparams.u_by:
+                        if u_method in ['mcd_d', 'mcd_r']:
+                            f.write(f'{u_method} params: \n')
+                            f.write(f'n_passes = {self.hparams.n_passes}\n')
+                            f.write(f'drop prob = {self.hparams.p}\n')
                 # f.write(f' auc socres: \n')
                 # for key in AUC_dict.keys():
                 #     f.write(f' {key} auc =  {AUC_dict[key]* 100.:.4f}\n')
@@ -882,16 +880,16 @@ class NeRFSystem(LightningModule):
                 #         f.write(f'pixel counts = {n_pixels}\n')
                 # f.close()
 
-            for u_method in self.hparams.u_by:
-                result_df.at[img_id, f'{u_method}_auc'] = logs[u_method].item()
+                for u_method in self.hparams.u_by:
+                    result_df.at[img_id, f'{u_method}_auc'] = logs[u_method].item()
 
-            result_df.at[img_id, f'common_npx'] = val_mask.sum().item()
+                result_df.at[img_id, f'common_npx'] = val_mask.sum().item()
 
-            for key in AUC_dict.keys():
-                result_df.at[img_id, f'{key}_auc'] = AUC_dict[key]* 100.
-                if key != 'rgb_err':
-                    n_pixels = count_dict[key].sum().item()
-                    result_df.at[img_id, f'{key}_npx'] = n_pixels
+                for key in AUC_dict.keys():
+                    result_df.at[img_id, f'{key}_auc'] = AUC_dict[key]* 100.
+                    if key != 'rgb_err':
+                        n_pixels = count_dict[key].sum().item()
+                        result_df.at[img_id, f'{key}_npx'] = n_pixels
 
         if not self.no_save_test: # save test image to disk
             idx = batch['img_idxs']
@@ -903,6 +901,9 @@ class NeRFSystem(LightningModule):
             rgb_gt = rearrange(batch['rgb'].cpu().numpy(), '(h w) c -> h w c', h=h)
             outputs['data']['rgb_gt'] = rgb_gt
             err = (rgb_gt - rgb_pred)**2
+            np.save(os.path.join(self.val_dir, f'{idx:03d}_e.npy'),err.mean(-1), allow_pickle=True)
+
+
             rgb_gt = (rgb_gt * 255).astype(np.uint8)
             ############################
 

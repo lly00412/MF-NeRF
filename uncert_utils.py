@@ -402,7 +402,7 @@ def warp_tgt_to_ref_sparse(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, 
     # proj_2d[:, 1] = torch.where(proj_2d[:, 1] >= width, width-1, proj_2d[:, 1])
     # proj_2d[:, 1] = torch.where(proj_2d[:, 1] < 0, 0, proj_2d[:, 1])
 
-    return warped_depth, pixl_ids.long(), mask
+    return warped_depth, pixl_ids.long()
 
 def warp_tgt_to_ref_sparse_v2(tgt_depth, ref_c2w, tgt_c2w, K, pixl_ids, img_shape, device='cpu'):
     torch.cuda.empty_cache()
