@@ -110,9 +110,9 @@ def get_opts():
     # warp settings
     # parser.add_argument("--theta", type=int, default=1,
     #                     help='number of passes for mc_dropout')
-    parser.add_argument("--n_vcam", type=int, default=10,
+    parser.add_argument("--n_vcam", type=int, default=6,
                                         help='number of virtual cameras')
-    parser.add_argument("--r_scale", type=float, default=0.05,
+    parser.add_argument("--r_scale", type=float, default=0.1,
                         help='depth ratio scale for sampling')
 
 

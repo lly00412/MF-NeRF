@@ -142,46 +142,44 @@ export BASE_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/LF/NGP/fewshot15/
 export PREFIX=LF/NGP/fewshot15
 
 #scenes=(room horns trex fortress)
-scenes=(basket)
-
-for SCENES in ${scenes[@]}
-do
-echo ${SCENES}
-
-################### entropy
-
-python train_nsvf.py \
-    --root_dir ${ROOT_DIR}/LF/${SCENES} \
-    --dataset_name colmap \
-    --downsample 1.0 \
-    --exp_name ${PREFIX}/${SCENES}/ \
-    --num_epochs 20 --batch_size 4096 --scale 16.0 --lr 2e-2 --eval_lpips \
-    --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
-    --rgb_channels 64 --rgb_layers 2 \
-    --vs_seed 349457 \
-    --random_bg \
-    --pre_train_epoch 20 \
-    --u_by warp mcd_r mcd_d entropy \
-    --n_passes 5 --p 0.2 \
-    --start 15 \
-    --vs_sample_rate 1.0 \
-    --eval_u \
-    --val_only \
-    --ckpt_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \
-
-done
+#scenes=(basket)
+#
+#for SCENES in ${scenes[@]}
+#do
+#echo ${SCENES}
+#
+#################### entropy
+#
+#python train_nsvf.py \
+#    --root_dir ${ROOT_DIR}/LF/${SCENES} \
+#    --dataset_name colmap \
+#    --downsample 1.0 \
+#    --exp_name ${PREFIX}/${SCENES}/ \
+#    --num_epochs 20 --batch_size 4096 --scale 16.0 --lr 2e-2 --eval_lpips \
+#    --L 16 --F 2 --T 20 --N_min 16 --grid Hash \
+#    --rgb_channels 64 --rgb_layers 2 \
+#    --vs_seed 349457 \
+#    --random_bg \
+#    --pre_train_epoch 20 \
+#    --u_by warp mcd_r mcd_d entropy \
+#    --n_passes 5 --p 0.2 \
+#    --start 15 \
+#    --vs_sample_rate 1.0 \
+#    --eval_u \
+#    --val_only \
+#    --ckpt_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \
+#
+#done
 
 
 export BASE_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/nerf_llff/NGP/fewshot15/
 export PREFIX=nerf_llff/NGP/fewshot15
 
-scenes=(horns)
+scenes=(room)
 
 for SCENES in ${scenes[@]}
 do
 echo ${SCENES}
-
-#################### entropy
 
 python train_nsvf.py \
     --root_dir ${ROOT_DIR}/nerf_llff_data/${SCENES} \
@@ -194,13 +192,14 @@ python train_nsvf.py \
     --vs_seed 349457 \
     --random_bg \
     --pre_train_epoch 20 \
-    --u_by warp mcd_r mcd_d entropy \
+    --u_by warp mcd_r mcd_d entropy --plot_roc \
     --n_passes 5 --p 0.2 \
     --start 15 \
     --vs_sample_rate 1.0 \
     --eval_u \
     --val_only \
-    --ckpt_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \
+    --ckpt_path ${BASE_DIR}/${SCENES}/auc/epoch=19.ckpt \
+    --test_img 4
 
 done
 

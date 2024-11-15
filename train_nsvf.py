@@ -851,18 +851,21 @@ class NeRFSystem(LightningModule):
 
                 val_err = rgb_err[pix_idxs][val_mask]
                 val_err = val_err.mean(-1).flatten().numpy()
-                ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(val_err, val_err,intervals=100)
+                ROC_dict['rgb_err'], AUC_dict['rgb_err'] = compute_roc(val_err, val_err,intervals=20)
 
                 for u_method in self.hparams.u_by:
                     sigmas = u_dict[u_method][val_mask].numpy()
-                    ROC_dict[u_method], AUC_dict[u_method] = compute_roc(val_err, sigmas, intervals=100)
+                    ROC_dict[u_method], AUC_dict[u_method] = compute_roc(val_err, sigmas, intervals=20)
 
 
                 logs['ROC'] = ROC_dict.copy()
                 logs['AUC'] = AUC_dict.copy()
 
+                roc_file = os.path.join(self.val_dir, f'{img_id:03d}_roc.npz')
+                np.savez(roc_file, roc_dict=ROC_dict)
+
                 fig_name = os.path.join(self.val_dir, f'{img_id:03d}_roc.png')
-                plot_roc(ROC_dict, fig_name, opt_label='rgb_err',intervals=100)
+                plot_roc(ROC_dict, fig_name, opt_label='rgb_err',intervals=20)
 
                 auc_log = os.path.join(self.val_dir, f'{img_id:03d}_auc.txt')
                 with open(auc_log, 'a') as f:
