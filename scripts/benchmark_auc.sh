@@ -138,18 +138,18 @@ export CUDA_VISIBLE_DEVICES=0
 
 #done
 
-export BASE_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/LF/NGP/fewshot15/
-export PREFIX=LF/NGP/fewshot15
-
-#scenes=(room horns trex fortress)
-#scenes=(basket)
+#export BASE_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/LF/NGP/fewshot15/
+#export PREFIX=LF/NGP/fewshot15
 #
+##scenes=(room horns trex fortress)
+#scenes=(africa)
+##
 #for SCENES in ${scenes[@]}
 #do
 #echo ${SCENES}
-#
-#################### entropy
-#
+##
+##################### entropy
+##
 #python train_nsvf.py \
 #    --root_dir ${ROOT_DIR}/LF/${SCENES} \
 #    --dataset_name colmap \
@@ -175,7 +175,7 @@ export PREFIX=LF/NGP/fewshot15
 export BASE_DIR=/mnt/Data2/liyan/MF-NeRF/ckpts/colmap/nerf_llff/NGP/fewshot15/
 export PREFIX=nerf_llff/NGP/fewshot15
 
-scenes=(room)
+scenes=(trex)
 
 for SCENES in ${scenes[@]}
 do
@@ -198,7 +198,7 @@ python train_nsvf.py \
     --vs_sample_rate 1.0 \
     --eval_u \
     --val_only \
-    --ckpt_path ${BASE_DIR}/${SCENES}/auc/epoch=19.ckpt \
+    --ckpt_path ${BASE_DIR}/${SCENES}/epoch=19.ckpt \
     --test_img 4
 
 done
